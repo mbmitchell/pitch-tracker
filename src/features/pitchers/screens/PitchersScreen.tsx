@@ -10,15 +10,13 @@ import { useAuth } from '@/services/auth';
 import { formatPitcherName, listPitchersForCoach } from '@/services/pitchers';
 import { PitcherProfile } from '@/types/models';
 import { colors, spacing } from '@/utils/theme';
-
-function formatDevelopmentPhase(value: PitcherProfile['development_phase']) {
-  return value.replace('_', ' ');
-}
+import { formatDevelopmentPhaseLabel } from '@/utils/workload';
 
 function formatArsenal(pitchArsenal: string[]) {
   return pitchArsenal.length ? pitchArsenal.join(', ') : 'No arsenal entered yet';
 }
 
+/** Renders the coach-owned pitcher roster for Phase 1. */
 export function PitchersScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
@@ -86,7 +84,7 @@ export function PitchersScreen() {
           <View style={styles.centerState}>
             <Text style={styles.emptyTitle}>No pitchers yet</Text>
             <Text style={styles.stateText}>
-              Add your first pitcher to start tracking roster profiles in Supabase.
+              Add your first pitcher to start tracking roster profiles and workload.
             </Text>
             <PrimaryButton
               label="Create first pitcher"
@@ -112,7 +110,7 @@ export function PitchersScreen() {
                     <Text style={styles.name}>{formatPitcherName(pitcher)}</Text>
                     <Text style={styles.meta}>
                       {[
-                        pitcher.age ? `${pitcher.age} yrs` : null,
+                        pitcher.age ? `${pitcher.age} years` : null,
                         pitcher.grade,
                         pitcher.level_team,
                       ]
@@ -124,7 +122,7 @@ export function PitchersScreen() {
                 </View>
 
                 <Text style={styles.phase}>
-                  Phase: {formatDevelopmentPhase(pitcher.development_phase)}
+                  Phase: {formatDevelopmentPhaseLabel(pitcher.development_phase)}
                 </Text>
                 <Text style={styles.arsenal}>Arsenal: {formatArsenal(pitcher.pitch_arsenal)}</Text>
 

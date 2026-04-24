@@ -14,14 +14,27 @@ import {
   buildBullpenRecommendationInput,
   generateBullpenRecommendation,
 } from '@/services/recommendations';
+import { formatPitcherName } from '@/services/pitchers';
 import { PitcherProfile } from '@/types/models';
 import { colors, spacing } from '@/utils/theme';
-import { formatEventTypeLabel } from '@/utils/workload';
+import {
+  formatArmFeelLabel,
+  formatBullpenFocusLabel,
+  formatDateLabel,
+  formatDaysSinceLabel,
+  formatDevelopmentPhaseLabel,
+  formatEventTypeLabel,
+  formatIntensityLabel,
+  formatPitchCountLabel,
+  formatSuggestedPreseasonPhaseLabel,
+  formatTargetGameReadyCountdownLabel,
+} from '@/utils/workload';
 
 type RecommendationsScreenProps = {
   pitcherId: string;
 };
 
+/** Renders the bullpen recommendation experience for one pitcher. */
 export function RecommendationsScreen({
   pitcherId,
 }: RecommendationsScreenProps) {
@@ -32,6 +45,7 @@ export function RecommendationsScreen({
   const [events, setEvents] = useState<ThrowingEventRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     async function loadPitcherRecommendations() {
@@ -65,7 +79,7 @@ export function RecommendationsScreen({
     }
 
     void loadPitcherRecommendations();
-  }, [isFocused, pitcherId, user?.id]);
+  }, [isFocused, pitcherId, refreshToken, user?.id]);
 
   if (isLoading) {
     return (
@@ -85,8 +99,17 @@ export function RecommendationsScreen({
         <SectionCard title="Roster">
           <Text style={styles.detail}>{error ?? 'Pitcher profile not found.'}</Text>
           <PrimaryButton
+            label="Try again"
+            onPress={() => {
+              setIsLoading(true);
+              setError(null);
+              setRefreshToken((value) => value + 1);
+            }}
+            tone="secondary"
+          />
+          <PrimaryButton
             label="Back to pitchers"
-            onPress={() => router.replace('/(tabs)/pitchers')}
+            onPress={() => router.replace('/pitchers')}
           />
         </SectionCard>
       </Screen>
@@ -99,19 +122,21 @@ export function RecommendationsScreen({
 
   return (
     <Screen
-      title={`${pitcher.first_name} ${pitcher.last_name} plan`}
+      title={`${formatPitcherName(pitcher)} plan`}
       subtitle="A transparent, rules-based bullpen recommendation built from recent workload and profile context."
     >
       <SectionCard title="Plan summary">
         <View style={styles.priorityRow}>
           <Text style={styles.priorityLabel}>Total pitch count</Text>
           <Text style={styles.priorityValue}>
-            {recommendation.recommended_total_pitch_count}
+            {formatPitchCountLabel(recommendation.recommended_total_pitch_count)}
           </Text>
         </View>
         <View style={styles.priorityRow}>
           <Text style={styles.priorityLabel}>Intensity</Text>
-          <Text style={styles.priorityValue}>{recommendation.recommended_intensity}</Text>
+          <Text style={styles.priorityValue}>
+            {formatIntensityLabel(recommendation.recommended_intensity)}
+          </Text>
         </View>
       </SectionCard>
 
@@ -121,7 +146,7 @@ export function RecommendationsScreen({
             <View style={styles.priorityRow}>
               <Text style={styles.blockTitle}>{item.pitch_type}</Text>
               <Text style={styles.priorityValue}>
-                {item.target_pitches} pitches ({item.share_percent}%)
+                {formatPitchCountLabel(item.target_pitches)} ({item.share_percent}%)
               </Text>
             </View>
             <Text style={styles.detail}>{item.intent}</Text>
@@ -134,7 +159,9 @@ export function RecommendationsScreen({
           <View key={block.label} style={styles.blockCard}>
             <View style={styles.priorityRow}>
               <Text style={styles.blockTitle}>{block.label}</Text>
-              <Text style={styles.priorityValue}>{block.target_pitches} pitches</Text>
+              <Text style={styles.priorityValue}>
+                {formatPitchCountLabel(block.target_pitches)}
+              </Text>
             </View>
             <Text style={styles.detail}>{block.intent}</Text>
           </View>
@@ -159,6 +186,17 @@ export function RecommendationsScreen({
             </Text>
           ))
         )}
+      </SectionCard>
+
+      <SectionCard title="About the model">
+        <View style={styles.contextNote}>
+          <Text style={styles.contextNoteText}>
+            {recommendation.metadata.about_model_note}
+          </Text>
+          <Text style={styles.contextSources}>
+            Reference points: {recommendation.metadata.supporting_sources.join(' • ')}
+          </Text>
+        </View>
       </SectionCard>
 
       <SectionCard title="Input snapshot">
@@ -186,31 +224,66 @@ function RecommendationInputSnapshot({
   return (
     <View style={styles.snapshot}>
       <Text style={styles.detail}>
-        Phase: {input.development_phase.replace(/_/g, ' ')}
+        Coach-selected phase:{' '}
+        {formatDevelopmentPhaseLabel(input.coach_selected_development_phase)}
       </Text>
       <Text style={styles.detail}>
-        Bullpen focus: {input.bullpen_focus.replace(/_/g, ' ')}
+        Recommendation phase: {formatDevelopmentPhaseLabel(input.development_phase)}
+      </Text>
+      {input.target_game_ready_date ? (
+        <>
+          <Text style={styles.detail}>
+            Target Game-Ready Date: {formatDateLabel(input.target_game_ready_date)}
+          </Text>
+          {input.suggested_preseason_phase &&
+          input.days_until_target_game_ready_date !== null &&
+          input.weeks_until_target_game_ready_date !== null ? (
+            <>
+              <Text style={styles.detail}>
+                Suggested preseason phase:{' '}
+                {formatSuggestedPreseasonPhaseLabel(input.suggested_preseason_phase)}
+              </Text>
+              <Text style={styles.detail}>
+                Target timeline:{' '}
+                {formatTargetGameReadyCountdownLabel({
+                  target_date: input.target_game_ready_date,
+                  suggested_phase: input.suggested_preseason_phase,
+                  days_until_target: input.days_until_target_game_ready_date,
+                  weeks_until_target: input.weeks_until_target_game_ready_date,
+                })}
+              </Text>
+            </>
+          ) : null}
+        </>
+      ) : null}
+      <Text style={styles.detail}>
+        Bullpen focus: {formatBullpenFocusLabel(input.bullpen_focus)}
       </Text>
       <Text style={styles.detail}>
-        Days since last throw: {input.days_since_last_throwing_event ?? 'No prior event'}
+        Days since last throw: {formatDaysSinceLabel(input.days_since_last_throwing_event)}
       </Text>
       <Text style={styles.detail}>
         Days since last high-intensity event:{' '}
-        {input.days_since_last_high_intensity_event ?? 'No prior high-intensity event'}
+        {input.days_since_last_high_intensity_event === null
+          ? 'No recent high-intensity event logged'
+          : formatDaysSinceLabel(input.days_since_last_high_intensity_event)}
       </Text>
       <Text style={styles.detail}>
-        Recent total workload: {input.recent_total_workload}
+        Recent total workload: {formatPitchCountLabel(input.recent_total_workload)}
       </Text>
       <Text style={styles.detail}>
         Last outing type:{' '}
         {input.last_outing_type ? formatEventTypeLabel(input.last_outing_type) : 'None'}
       </Text>
-      <Text style={styles.detail}>Arm feel: {input.arm_feel}</Text>
+      <Text style={styles.detail}>Arm feel: {formatArmFeelLabel(input.arm_feel)}</Text>
       <Text style={styles.detail}>
-        Recent comparable workload: {input.recent_comparable_workload ?? 'No baseline yet'}
+        Recent comparable workload:{' '}
+        {input.recent_comparable_workload === null
+          ? 'No baseline yet'
+          : formatPitchCountLabel(input.recent_comparable_workload)}
       </Text>
       <Text style={styles.detail}>
-        Arsenal: {input.pitch_arsenal.length ? input.pitch_arsenal.join(', ') : 'No arsenal entered'}
+        Arsenal: {input.pitch_arsenal.length ? input.pitch_arsenal.join(', ') : 'No arsenal entered yet'}
       </Text>
     </View>
   );
@@ -236,6 +309,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     color: colors.text,
+  },
+  contextNote: {
+    marginTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    gap: spacing.xs,
+  },
+  contextNoteText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.muted,
+  },
+  contextSources: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: colors.muted,
   },
   blockCard: {
     borderWidth: 1,

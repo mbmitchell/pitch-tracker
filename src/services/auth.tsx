@@ -47,6 +47,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const missingConfigMessage =
   'Supabase Auth is not configured yet. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to continue.';
 
+/**
+ * Provides the authenticated Supabase session and Phase 1 auth actions to the app.
+ *
+ * @param children - app subtree that needs auth state
+ * @returns provider wrapping auth-aware UI
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -209,6 +215,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Reads the shared auth context.
+ *
+ * @returns current session, user, and auth actions
+ */
 export function useAuth() {
   const context = useContext(AuthContext);
 

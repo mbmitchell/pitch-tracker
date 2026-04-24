@@ -1,18 +1,37 @@
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
-  ArmFeel,
-  BullpenFocus,
   EventPitchBreakdown,
   EventPitchBreakdownInsert,
   EventType,
-  Intensity,
   PitcherProfile,
   SourceType,
   ThrowingEvent,
   ThrowingEventInsert,
 } from '@/types/models';
+import {
+  ArmFeel,
+  BullpenFocus,
+  Intensity,
+} from '@/types/models';
+import { validateThrowingEventInput } from '@/utils/validation';
 
 import { getPitcherByIdForCoach } from '@/services/pitchers';
+import {
+  generateClientId,
+  getLocalPitcherByIdForCoach,
+  listLocalPitchBreakdownForEventIds,
+  listLocalThrowingEventsForCoach,
+  listLocalThrowingEventsForPitcher,
+  upsertLocalPitchBreakdownRows,
+  upsertLocalThrowingEvent,
+  upsertLocalThrowingEvents,
+} from '@/services/localData';
+import {
+  getIsOnline,
+  processPendingSyncQueueForCoach,
+  queueLocalSyncMutation,
+  refreshPendingSyncCount,
+} from '@/services/sync';
 
 export type PitchBreakdownInput = {
   pitch_type: string;
@@ -39,12 +58,8 @@ export type ThrowingEventRecord = ThrowingEvent & {
 
 const supabaseClient = supabase as any;
 
-function assertSupabaseConfigured() {
-  if (!isSupabaseConfigured) {
-    throw new Error(
-      'Supabase is not configured yet. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to continue.'
-    );
-  }
+function canUseRemote() {
+  return isSupabaseConfigured && getIsOnline();
 }
 
 function normalizePitchBreakdown(
@@ -54,8 +69,7 @@ function normalizePitchBreakdown(
     .map((item) => ({
       pitch_type: item.pitch_type.trim(),
       pitch_count: item.pitch_count,
-    }))
-    .filter((item) => item.pitch_type && item.pitch_count >= 0);
+    }));
 }
 
 function normalizeThrowingEventInput(input: ThrowingEventInput): ThrowingEventInput {
@@ -74,90 +88,10 @@ function normalizeThrowingEventInput(input: ThrowingEventInput): ThrowingEventIn
   };
 }
 
-export async function createThrowingEventForCoach(
-  coachId: string,
-  input: ThrowingEventInput
-) {
-  assertSupabaseConfigured();
-
-  const pitcher = await getPitcherByIdForCoach(input.pitcher_id, coachId);
-
-  if (!pitcher) {
-    throw new Error('Pitcher profile not found for this coach.');
-  }
-
-  const normalizedInput = normalizeThrowingEventInput(input);
-
-  const eventPayload: ThrowingEventInsert = {
-    pitcher_id: normalizedInput.pitcher_id,
-    date: normalizedInput.date,
-    event_type: normalizedInput.event_type,
-    total_pitches: normalizedInput.total_pitches,
-    innings_thrown: normalizedInput.innings_thrown,
-    intensity: normalizedInput.intensity,
-    arm_feel: normalizedInput.arm_feel,
-    bullpen_focus: normalizedInput.bullpen_focus,
-    notes: normalizedInput.notes,
-    entered_by_user_id: coachId,
-    source_type: normalizedInput.source_type ?? 'coach',
-  };
-
-  const { data: event, error: eventError } = await supabaseClient
-    .from('throwing_events')
-    .insert(eventPayload)
-    .select('*')
-    .single();
-
-  if (eventError) {
-    throw new Error(eventError.message);
-  }
-
-  const pitchBreakdown = normalizedInput.pitch_breakdown ?? [];
-
-  if (!pitchBreakdown.length) {
-    return {
-      event: event as ThrowingEvent,
-      event_pitch_breakdown: [] as EventPitchBreakdown[],
-      pitcher,
-    };
-  }
-
-  const breakdownPayload: EventPitchBreakdownInsert[] = pitchBreakdown.map((item) => ({
-    event_id: (event as ThrowingEvent).id,
-    pitch_type: item.pitch_type,
-    pitch_count: item.pitch_count,
-  }));
-
-  const { data: breakdown, error: breakdownError } = await supabaseClient
-    .from('event_pitch_breakdown')
-    .insert(breakdownPayload)
-    .select('*');
-
-  if (breakdownError) {
-    await supabaseClient.from('throwing_events').delete().eq('id', (event as ThrowingEvent).id);
-    throw new Error(breakdownError.message);
-  }
-
-  return {
-    event: event as ThrowingEvent,
-    event_pitch_breakdown: (breakdown ?? []) as EventPitchBreakdown[],
-    pitcher,
-  };
-}
-
-export async function listThrowingEventsForPitcher(
-  coachId: string,
+async function fetchThrowingEventsForPitcherFromRemote(
   pitcherId: string,
-  limit = 10
+  limit: number
 ) {
-  assertSupabaseConfigured();
-
-  const pitcher = await getPitcherByIdForCoach(pitcherId, coachId);
-
-  if (!pitcher) {
-    throw new Error('Pitcher profile not found for this coach.');
-  }
-
   const { data, error } = await supabaseClient
     .from('throwing_events')
     .select('*, event_pitch_breakdown(*)')
@@ -170,21 +104,13 @@ export async function listThrowingEventsForPitcher(
     throw new Error(error.message);
   }
 
-  return {
-    pitcher,
-    events: ((data ?? []) as ThrowingEventRecord[]).map((event) => ({
-      ...event,
-      event_pitch_breakdown: event.event_pitch_breakdown ?? [],
-    })),
-  };
+  return ((data ?? []) as ThrowingEventRecord[]).map((event) => ({
+    ...event,
+    event_pitch_breakdown: event.event_pitch_breakdown ?? [],
+  }));
 }
 
-export async function listThrowingEventsForCoach(
-  coachId: string,
-  limit = 200
-) {
-  assertSupabaseConfigured();
-
+async function fetchThrowingEventsForCoachFromRemote(coachId: string, limit: number) {
   const { data: pitchers, error: pitcherError } = await supabaseClient
     .from('pitcher_profiles')
     .select('id')
@@ -194,9 +120,7 @@ export async function listThrowingEventsForCoach(
     throw new Error(pitcherError.message);
   }
 
-  const pitcherIds = ((pitchers ?? []) as Array<{ id: string }>).map(
-    (pitcher) => pitcher.id
-  );
+  const pitcherIds = ((pitchers ?? []) as Array<{ id: string }>).map((pitcher) => pitcher.id);
 
   if (!pitcherIds.length) {
     return [] as ThrowingEvent[];
@@ -217,10 +141,252 @@ export async function listThrowingEventsForCoach(
   return (data ?? []) as ThrowingEvent[];
 }
 
+async function hydrateLocalPitcherEvents(
+  coachId: string,
+  pitcherId: string,
+  limit: number
+) {
+  const events = await listLocalThrowingEventsForPitcher(coachId, pitcherId, limit);
+  const breakdownRows = await listLocalPitchBreakdownForEventIds(events.map((event) => event.id));
+  const breakdownByEventId = new Map<string, EventPitchBreakdown[]>();
+
+  breakdownRows.forEach((row) => {
+    const existing = breakdownByEventId.get(row.event_id) ?? [];
+    existing.push(row);
+    breakdownByEventId.set(row.event_id, existing);
+  });
+
+  return events.map<ThrowingEventRecord>((event) => ({
+    ...event,
+    event_pitch_breakdown: breakdownByEventId.get(event.id) ?? [],
+  }));
+}
+
+async function triggerSyncIfOnline(coachId: string) {
+  if (!canUseRemote()) {
+    await refreshPendingSyncCount(coachId);
+    return;
+  }
+
+  await processPendingSyncQueueForCoach(coachId);
+  await refreshPendingSyncCount(coachId);
+}
+
+/**
+ * Creates a throwing event for a coach-owned pitcher and queues it for sync.
+ *
+ * The event is written locally first so tracking can continue offline, then the
+ * sync layer reconciles it with Supabase when connectivity is available.
+ *
+ * @param coachId - authenticated coach id
+ * @param input - validated event payload from the form flow
+ * @returns locally persisted event record with optional pitch breakdown rows
+ */
+export async function createThrowingEventForCoach(
+  coachId: string,
+  input: ThrowingEventInput
+) {
+  const pitcher =
+    (await getLocalPitcherByIdForCoach(coachId, input.pitcher_id)) ??
+    (await getPitcherByIdForCoach(input.pitcher_id, coachId));
+
+  if (!pitcher) {
+    throw new Error('Pitcher profile not found for this coach.');
+  }
+
+  const normalizedInput = normalizeThrowingEventInput(input);
+  const validationError = validateThrowingEventInput(normalizedInput);
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const now = new Date().toISOString();
+  const eventId = generateClientId('event');
+
+  const event: ThrowingEvent = {
+    id: eventId,
+    pitcher_id: normalizedInput.pitcher_id,
+    date: normalizedInput.date,
+    event_type: normalizedInput.event_type,
+    total_pitches: normalizedInput.total_pitches,
+    innings_thrown: normalizedInput.innings_thrown,
+    intensity: normalizedInput.intensity,
+    arm_feel: normalizedInput.arm_feel,
+    bullpen_focus: normalizedInput.bullpen_focus,
+    notes: normalizedInput.notes,
+    entered_by_user_id: coachId,
+    source_type: normalizedInput.source_type ?? 'coach',
+    created_at: now,
+    updated_at: now,
+  };
+
+  // Breakdown rows get stable client ids up front so offline-created events and
+  // their child rows can be synced without a second reconciliation pass.
+  const breakdownRows: EventPitchBreakdown[] = (normalizedInput.pitch_breakdown ?? []).map(
+    (item) => ({
+      id: generateClientId('breakdown'),
+      event_id: eventId,
+      pitch_type: item.pitch_type,
+      pitch_count: item.pitch_count,
+    })
+  );
+
+  const eventPayload: ThrowingEventInsert = { ...event };
+
+  await upsertLocalThrowingEvent(coachId, event, 'pending');
+  await queueLocalSyncMutation({
+    id: generateClientId('queue'),
+    coach_id: coachId,
+    mutation_type: 'create_throwing_event',
+    entity_id: event.id,
+    payload_json: JSON.stringify(eventPayload),
+    status: 'pending',
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (breakdownRows.length) {
+    await upsertLocalPitchBreakdownRows(coachId, breakdownRows, 'pending');
+
+    for (const row of breakdownRows) {
+      const breakdownPayload: EventPitchBreakdownInsert = { ...row };
+      await queueLocalSyncMutation({
+        id: generateClientId('queue'),
+        coach_id: coachId,
+        mutation_type: 'create_pitch_breakdown',
+        entity_id: row.id,
+        payload_json: JSON.stringify(breakdownPayload),
+        status: 'pending',
+        created_at: now,
+        updated_at: now,
+      });
+    }
+  }
+
+  await triggerSyncIfOnline(coachId);
+
+  return {
+    event,
+    event_pitch_breakdown: breakdownRows,
+    pitcher,
+  };
+}
+
+/**
+ * Returns a pitcher plus recent throwing history, preferring cached data first.
+ *
+ * When online, the function refreshes local cache from Supabase and still falls
+ * back to local results if remote reads fail after some data has already been cached.
+ *
+ * @param coachId - authenticated coach id
+ * @param pitcherId - target pitcher id
+ * @param limit - max number of events to return
+ * @returns pitcher profile with hydrated throwing history and breakdown rows
+ */
+export async function listThrowingEventsForPitcher(
+  coachId: string,
+  pitcherId: string,
+  limit = 10
+) {
+  const pitcher =
+    (await getLocalPitcherByIdForCoach(coachId, pitcherId)) ??
+    (await getPitcherByIdForCoach(pitcherId, coachId));
+
+  if (!pitcher) {
+    throw new Error('Pitcher profile not found for this coach.');
+  }
+
+  const localEvents = await hydrateLocalPitcherEvents(coachId, pitcherId, limit);
+
+  if (!canUseRemote()) {
+    return {
+      pitcher,
+      events: localEvents,
+    };
+  }
+
+  try {
+    const remoteEvents = await fetchThrowingEventsForPitcherFromRemote(pitcherId, limit);
+    await upsertLocalThrowingEvents(
+      coachId,
+      remoteEvents.map((event) => ({
+        id: event.id,
+        pitcher_id: event.pitcher_id,
+        date: event.date,
+        event_type: event.event_type,
+        total_pitches: event.total_pitches,
+        innings_thrown: event.innings_thrown,
+        intensity: event.intensity,
+        arm_feel: event.arm_feel,
+        bullpen_focus: event.bullpen_focus,
+        notes: event.notes,
+        entered_by_user_id: event.entered_by_user_id,
+        source_type: event.source_type,
+        created_at: event.created_at,
+        updated_at: event.updated_at,
+      })),
+      'synced'
+    );
+
+    for (const event of remoteEvents) {
+      await upsertLocalPitchBreakdownRows(coachId, event.event_pitch_breakdown, 'synced');
+    }
+
+    return {
+      pitcher,
+      events: await hydrateLocalPitcherEvents(coachId, pitcherId, limit),
+    };
+  } catch (error) {
+    return {
+      pitcher,
+      events: localEvents,
+    };
+  }
+}
+
+/**
+ * Lists recent throwing events across all pitchers owned by a coach.
+ *
+ * This powers coach-level overviews where event detail rows are less important
+ * than recency ordering and aggregate workload context.
+ *
+ * @param coachId - authenticated coach id
+ * @param limit - max number of events to return
+ * @returns throwing events in descending recency order
+ */
+export async function listThrowingEventsForCoach(coachId: string, limit = 200) {
+  const localEvents = await listLocalThrowingEventsForCoach(coachId, limit);
+
+  if (!canUseRemote()) {
+    return localEvents;
+  }
+
+  try {
+    const remoteEvents = await fetchThrowingEventsForCoachFromRemote(coachId, limit);
+    await upsertLocalThrowingEvents(coachId, remoteEvents, 'synced');
+    return listLocalThrowingEventsForCoach(coachId, limit);
+  } catch (error) {
+    return localEvents;
+  }
+}
+
+/**
+ * Identifies event types that should be treated as outing-style workload.
+ *
+ * @param eventType - throwing event type
+ * @returns true when the event should count as an outing for workload logic
+ */
 export function isOutingEvent(eventType: EventType) {
   return eventType === 'game_outing' || eventType === 'live_ab';
 }
 
+/**
+ * Identifies bullpen events for bullpen-specific summaries and focus logic.
+ *
+ * @param eventType - throwing event type
+ * @returns true when the event should count as a bullpen session
+ */
 export function isBullpenEvent(eventType: EventType) {
   return eventType === 'bullpen';
 }

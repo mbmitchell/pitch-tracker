@@ -9,6 +9,7 @@ import { TextField } from '@/components/TextField';
 import { useAuth } from '@/services/auth';
 import { colors, spacing } from '@/utils/theme';
 
+/** Renders the Phase 1 coach sign-in flow. */
 export function SignInScreen() {
   const { authError, clearAuthError, isSigningIn, signIn } = useAuth();
   const [email, setEmail] = useState('');

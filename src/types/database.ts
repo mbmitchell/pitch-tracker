@@ -48,6 +48,7 @@ export interface PitcherProfile {
   age: number | null;
   grade: string | null;
   level_team: string | null;
+  target_game_ready_date: string | null;
   handedness: Handedness;
   pitch_arsenal: string[];
   development_phase: DevelopmentPhase;
@@ -94,6 +95,7 @@ export interface Database {
           age?: number | null;
           grade?: string | null;
           level_team?: string | null;
+          target_game_ready_date?: string | null;
           handedness: Handedness;
           pitch_arsenal?: string[];
           development_phase: DevelopmentPhase;
@@ -110,6 +112,7 @@ export interface Database {
           age?: number | null;
           grade?: string | null;
           level_team?: string | null;
+          target_game_ready_date?: string | null;
           handedness?: Handedness;
           pitch_arsenal?: string[];
           development_phase?: DevelopmentPhase;

@@ -1,21 +1,19 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
+import { useRouter } from 'expo-router';
 
-import { useAuth } from '@/services/auth';
 import { colors, spacing } from '@/utils/theme';
 
-/** Renders the authenticated-area sign-out action used in navigation headers. */
-export function SignOutHeaderButton() {
-  const { signOut, isSigningOut } = useAuth();
+export function HomeHeaderButton() {
+  const router = useRouter();
 
   return (
     <Pressable
-      disabled={isSigningOut}
       onPress={() => {
-        void signOut();
+        router.replace('/');
       }}
-      style={({ pressed }) => [styles.button, (pressed || isSigningOut) && styles.pressed]}
+      style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >
-      <Text style={styles.label}>{isSigningOut ? 'Signing out...' : 'Sign out'}</Text>
+      <Text style={styles.label}>Home</Text>
     </Pressable>
   );
 }

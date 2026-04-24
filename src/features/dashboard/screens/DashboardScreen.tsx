@@ -6,33 +6,26 @@ import { useIsFocused } from '@react-navigation/native';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { SectionCard } from '@/components/SectionCard';
-import { buildPitcherStaffOverview, PitcherStaffOverview } from '@/features/dashboard/utils/staffOverview';
+import { PitcherStaffOverviewRow } from '@/features/dashboard/components/PitcherStaffOverviewRow';
+import {
+  buildPitcherStaffOverview,
+  PitcherStaffOverview,
+  READINESS_FILTER_CONFIG,
+  ReadinessFilterKey,
+} from '@/features/dashboard/utils/staffOverview';
 import { useAuth } from '@/services/auth';
 import { listThrowingEventsForCoach } from '@/services/events';
-import { formatPitcherName, listPitchersForCoach } from '@/services/pitchers';
+import { listPitchersForCoach } from '@/services/pitchers';
 import { colors, spacing } from '@/utils/theme';
-import { formatDateLabel, formatEventTypeLabel } from '@/utils/workload';
 
-function readinessBadgeStyle(status: PitcherStaffOverview['readiness']) {
-  switch (status) {
-    case 'ready for bullpen':
-      return {
-        backgroundColor: colors.successSoft,
-        color: colors.success,
-      };
-    case 'moderate':
-      return {
-        backgroundColor: colors.primarySoft,
-        color: colors.primary,
-      };
-    default:
-      return {
-        backgroundColor: colors.dangerSoft,
-        color: colors.danger,
-      };
-  }
-}
+type TodayAtAGlanceCard = {
+  key: 'pitchers' | ReadinessFilterKey;
+  label: string;
+  value: number;
+  onPress: () => void;
+};
 
+/** Renders the coach dashboard with readiness summaries and quick actions. */
 export function DashboardScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
@@ -40,6 +33,7 @@ export function DashboardScreen() {
   const [overview, setOverview] = useState<PitcherStaffOverview[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -67,14 +61,50 @@ export function DashboardScreen() {
     }
 
     void loadDashboard();
-  }, [isFocused, user?.id]);
+  }, [isFocused, refreshToken, user?.id]);
 
-  const readyCount = overview.filter(
-    (item) => item.readiness === 'ready for bullpen'
-  ).length;
-  const cautionCount = overview.filter(
-    (item) => item.readiness === 'rest / caution'
-  ).length;
+  const readyCount = overview.filter((item) => item.readiness === 'ready for bullpen').length;
+  const moderateCount = overview.filter((item) => item.readiness === 'moderate').length;
+  const cautionCount = overview.filter((item) => item.readiness === 'rest / caution').length;
+
+  const todayAtAGlanceCards: TodayAtAGlanceCard[] = [
+    {
+      key: 'pitchers',
+      label: 'Pitchers',
+      value: overview.length,
+      onPress: () => router.push('/pitchers'),
+    },
+    {
+      key: 'ready',
+      label: READINESS_FILTER_CONFIG.ready.cardLabel,
+      value: readyCount,
+      onPress: () =>
+        router.push({
+          pathname: '/pitchers/status',
+          params: { filter: 'ready' },
+        }),
+    },
+    {
+      key: 'moderate',
+      label: READINESS_FILTER_CONFIG.moderate.cardLabel,
+      value: moderateCount,
+      onPress: () =>
+        router.push({
+          pathname: '/pitchers/status',
+          params: { filter: 'moderate' },
+        }),
+    },
+    {
+      key: 'caution',
+      label: READINESS_FILTER_CONFIG.caution.cardLabel,
+      value: cautionCount,
+      onPress: () =>
+        router.push({
+          pathname: '/pitchers/status',
+          params: { filter: 'caution' },
+        }),
+    },
+  ];
 
   return (
     <Screen
@@ -82,27 +112,38 @@ export function DashboardScreen() {
       subtitle="Scan recent workload and quick readiness for every pitcher on this coach account."
     >
       <SectionCard title="Today at a glance">
-        <View style={styles.statRow}>
-          <View style={styles.statBlock}>
-            <Text style={styles.statValue}>{overview.length}</Text>
-            <Text style={styles.statLabel}>Pitchers</Text>
-          </View>
-          <View style={styles.statBlock}>
-            <Text style={styles.statValue}>{readyCount}</Text>
-            <Text style={styles.statLabel}>Ready</Text>
-          </View>
-          <View style={styles.statBlock}>
-            <Text style={styles.statValue}>{cautionCount}</Text>
-            <Text style={styles.statLabel}>Caution</Text>
-          </View>
+        <View style={styles.cardGrid}>
+          {todayAtAGlanceCards.map((card) => (
+            <Pressable
+              key={card.key}
+              onPress={card.onPress}
+              style={({ pressed }) => [styles.statBlock, pressed && styles.pressed]}
+            >
+              <Text style={styles.statValue}>{card.value}</Text>
+              <Text style={styles.statLabel}>{card.label}</Text>
+            </Pressable>
+          ))}
         </View>
         {isLoading ? (
-          <View style={styles.inlineState}>
+          <View style={styles.inlineStateRow}>
             <ActivityIndicator color={colors.primary} size="small" />
             <Text style={styles.copy}>Refreshing roster and workload history...</Text>
           </View>
         ) : null}
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {!isLoading && error ? (
+          <View style={styles.inlineState}>
+            <Text style={styles.errorText}>{error}</Text>
+            <PrimaryButton
+              label="Try again"
+              onPress={() => {
+                setIsLoading(true);
+                setError(null);
+                setRefreshToken((value) => value + 1);
+              }}
+              tone="secondary"
+            />
+          </View>
+        ) : null}
       </SectionCard>
 
       <SectionCard title="Quick actions">
@@ -129,56 +170,18 @@ export function DashboardScreen() {
         ) : null}
 
         {!isLoading && !error
-          ? overview.map((item) => {
-              const badge = readinessBadgeStyle(item.readiness);
-
-              return (
-                <Pressable
-                  key={item.pitcher.id}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/pitchers/[id]',
-                      params: { id: item.pitcher.id },
-                    })
-                  }
-                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-                >
-                  <View style={styles.rowHeader}>
-                    <View style={styles.nameBlock}>
-                      <Text style={styles.name}>{formatPitcherName(item.pitcher)}</Text>
-                      <Text style={styles.meta}>
-                        {item.pitcher.level_team ?? item.pitcher.grade ?? 'No team or grade entered'}
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.badge,
-                        { backgroundColor: badge.backgroundColor, color: badge.color },
-                      ]}
-                    >
-                      {item.readiness}
-                    </Text>
-                  </View>
-
-                  <View style={styles.summaryRow}>
-                    <View style={styles.summaryBlock}>
-                      <Text style={styles.summaryLabel}>Last throwing date</Text>
-                      <Text style={styles.summaryValue}>
-                        {item.lastThrowingDate ? formatDateLabel(item.lastThrowingDate) : 'No events yet'}
-                      </Text>
-                    </View>
-                    <View style={styles.summaryBlock}>
-                      <Text style={styles.summaryLabel}>Recent pitch count</Text>
-                      <Text style={styles.summaryValue}>{item.recentPitchCount}</Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.meta}>
-                    Last event: {item.lastEventType ? formatEventTypeLabel(item.lastEventType) : 'No events yet'}
-                  </Text>
-                </Pressable>
-              );
-            })
+          ? overview.map((item) => (
+              <PitcherStaffOverviewRow
+                key={item.pitcher.id}
+                item={item}
+                onPress={() =>
+                  router.push({
+                    pathname: '/pitchers/[id]',
+                    params: { id: item.pitcher.id },
+                  })
+                }
+              />
+            ))
           : null}
       </SectionCard>
     </Screen>
@@ -186,12 +189,13 @@ export function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  statRow: {
+  cardGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.md,
   },
   statBlock: {
-    flex: 1,
+    width: '47%',
     backgroundColor: colors.primarySoft,
     borderRadius: 16,
     padding: spacing.md,
@@ -207,6 +211,9 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
   inlineState: {
+    gap: spacing.sm,
+  },
+  inlineStateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
@@ -228,59 +235,6 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  row: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  rowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    alignItems: 'flex-start',
-  },
-  nameBlock: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  meta: {
-    fontSize: 13,
-    color: colors.muted,
-    lineHeight: 19,
-  },
-  badge: {
-    fontSize: 12,
-    fontWeight: '700',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  summaryBlock: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  summaryLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.muted,
-  },
-  summaryValue: {
-    fontSize: 14,
     fontWeight: '700',
     color: colors.text,
   },

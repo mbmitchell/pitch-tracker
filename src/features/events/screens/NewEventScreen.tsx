@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
+import { DatePickerField } from '@/components/DatePickerField';
 import { FullScreenLoader } from '@/components/FullScreenLoader';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
@@ -18,7 +19,9 @@ import {
   Intensity,
   PitcherProfile,
 } from '@/types/models';
+import { getTodayIsoDateString } from '@/utils/dates';
 import { colors, spacing } from '@/utils/theme';
+import { validateThrowingEventInput } from '@/utils/validation';
 
 type NewEventScreenProps = {
   initialPitcherId?: string;
@@ -65,10 +68,6 @@ const bullpenFocusOptions: Array<{ label: string; value: BullpenFocus }> = [
   { label: 'Other', value: 'other' },
 ];
 
-function getTodayDateString() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function createBreakdownRow(): PitchBreakdownRow {
   return {
     id: Math.random().toString(36).slice(2, 10),
@@ -77,6 +76,7 @@ function createBreakdownRow(): PitchBreakdownRow {
   };
 }
 
+/** Renders the event-entry flow for bullpen, outing, and other throwing work. */
 export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
   const router = useRouter();
   const { user } = useAuth();
@@ -84,7 +84,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
   const [isLoadingPitchers, setIsLoadingPitchers] = useState(true);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [selectedPitcherId, setSelectedPitcherId] = useState(initialPitcherId ?? '');
-  const [date, setDate] = useState(getTodayDateString());
+  const [date, setDate] = useState(getTodayIsoDateString());
   const [eventType, setEventType] = useState<EventType | null>('bullpen');
   const [totalPitches, setTotalPitches] = useState('');
   const [inningsThrown, setInningsThrown] = useState('');
@@ -96,6 +96,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     async function loadPitchers() {
@@ -123,7 +124,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
     }
 
     void loadPitchers();
-  }, [selectedPitcherId, user?.id]);
+  }, [refreshToken, selectedPitcherId, user?.id]);
 
   const pitcherOptions = useMemo(
     () =>
@@ -139,73 +140,31 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
       .map((row) => ({
         pitch_type: row.pitch_type.trim(),
         pitch_count: row.pitch_count.trim() ? Number(row.pitch_count) : NaN,
-      }))
-      .filter((row) => row.pitch_type || !Number.isNaN(row.pitch_count));
+      }));
   }
 
   function validateForm() {
-    if (!selectedPitcherId) {
-      return 'Choose a pitcher before saving the event.';
-    }
-
-    if (!date.trim()) {
-      return 'Enter the event date.';
-    }
-
-    if (!eventType) {
-      return 'Choose an event type.';
+    if (!eventType || !intensity || !armFeel) {
+      return 'Choose the event type, intensity, and arm-feel rating.';
     }
 
     if (!totalPitches.trim()) {
       return 'Enter the total pitch count.';
     }
 
-    const parsedTotalPitches = Number(totalPitches);
-
-    if (!Number.isInteger(parsedTotalPitches) || parsedTotalPitches < 0) {
-      return 'Total pitches must be a whole number of 0 or greater.';
-    }
-
-    if (inningsThrown.trim()) {
-      const parsedInnings = Number(inningsThrown);
-
-      if (Number.isNaN(parsedInnings) || parsedInnings < 0) {
-        return 'Innings thrown must be a positive number when entered.';
-      }
-    }
-
-    if (!intensity) {
-      return 'Choose an intensity level.';
-    }
-
-    if (!armFeel) {
-      return 'Choose an arm-feel rating.';
-    }
-
-    const normalizedBreakdown = normalizePitchBreakdownInput();
-
-    if (
-      normalizedBreakdown.some(
-        (row) =>
-          !row.pitch_type ||
-          !Number.isInteger(row.pitch_count) ||
-          Number.isNaN(row.pitch_count) ||
-          row.pitch_count < 0
-      )
-    ) {
-      return 'Pitch breakdown rows need both a pitch type and a whole-number count.';
-    }
-
-    const breakdownTotal = normalizedBreakdown.reduce(
-      (sum, row) => sum + row.pitch_count,
-      0
-    );
-
-    if (breakdownTotal > parsedTotalPitches) {
-      return 'Pitch breakdown total cannot exceed total pitches.';
-    }
-
-    return null;
+    return validateThrowingEventInput({
+      pitcher_id: selectedPitcherId,
+      date,
+      event_type: eventType,
+      total_pitches: Number(totalPitches),
+      innings_thrown: inningsThrown.trim() ? Number(inningsThrown) : null,
+      intensity,
+      arm_feel: armFeel,
+      bullpen_focus: bullpenFocus,
+      notes,
+      source_type: 'coach',
+      pitch_breakdown: normalizePitchBreakdownInput(),
+    });
   }
 
   async function handleSubmit() {
@@ -263,13 +222,24 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
 
   if (loadingError) {
     return (
-      <Screen title="Unable to load roster" subtitle="The throwing-event form needs your pitcher list first.">
+      <Screen
+        title="Unable to load roster"
+        subtitle="The event form needs your roster before it can load."
+      >
         <SectionCard title="Roster">
           <Text style={styles.errorText}>{loadingError}</Text>
           <PrimaryButton
+            label="Try again"
+            onPress={() => {
+              setIsLoadingPitchers(true);
+              setLoadingError(null);
+              setRefreshToken((value) => value + 1);
+            }}
+            tone="secondary"
+          />
+          <PrimaryButton
             label="Back to dashboard"
             onPress={() => router.replace('/')}
-            tone="secondary"
           />
         </SectionCard>
       </Screen>
@@ -309,13 +279,13 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
           selectedValue={selectedPitcherId}
         />
 
-        <TextField
+        <DatePickerField
+          helperText="Stored as YYYY-MM-DD internally and shown in MM/DD/YYYY for coaches."
           label="Date"
-          onChangeText={(value) => {
-            setDate(value);
+          onChange={(value) => {
+            setDate(value ?? getTodayIsoDateString());
             setValidationError(null);
           }}
-          placeholder="2026-04-20"
           value={date}
         />
 
@@ -327,35 +297,54 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
             if (nextValue !== 'bullpen') {
               setBullpenFocus(null);
             }
+            if (nextValue !== 'game_outing') {
+              setInningsThrown('');
+            }
             setValidationError(null);
           }}
           options={eventTypeOptions}
           selectedValue={eventType}
         />
 
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <TextField
-              keyboardType="number-pad"
-              label="Total pitches"
-              onChangeText={(value) => {
-                setTotalPitches(value);
-                setValidationError(null);
-              }}
-              placeholder="42"
-              value={totalPitches}
-            />
+        {eventType === 'game_outing' ? (
+          <View style={styles.row}>
+            <View style={styles.flex}>
+              <TextField
+                keyboardType="number-pad"
+                label="Total pitches"
+                onChangeText={(value) => {
+                  setTotalPitches(value);
+                  setValidationError(null);
+                }}
+                placeholder="42"
+                value={totalPitches}
+              />
+            </View>
+            <View style={styles.flex}>
+              <TextField
+                keyboardType="decimal-pad"
+                label="Innings thrown"
+                onChangeText={(value) => {
+                  setInningsThrown(value);
+                  setValidationError(null);
+                }}
+                placeholder="2.0"
+                value={inningsThrown}
+              />
+            </View>
           </View>
-          <View style={styles.flex}>
-            <TextField
-              keyboardType="decimal-pad"
-              label="Innings thrown"
-              onChangeText={setInningsThrown}
-              placeholder="2.0"
-              value={inningsThrown}
-            />
-          </View>
-        </View>
+        ) : (
+          <TextField
+            keyboardType="number-pad"
+            label="Total pitches"
+            onChangeText={(value) => {
+              setTotalPitches(value);
+              setValidationError(null);
+            }}
+            placeholder="42"
+            value={totalPitches}
+          />
+        )}
 
         <OptionChipGroup
           label="Intensity"
@@ -424,6 +413,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
                         item.id === row.id ? { ...item, pitch_type: value } : item
                       )
                     );
+                    setValidationError(null);
                   }}
                   placeholder="Slider"
                   value={row.pitch_type}
@@ -439,6 +429,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
                         item.id === row.id ? { ...item, pitch_count: value } : item
                       )
                     );
+                    setValidationError(null);
                   }}
                   placeholder="12"
                   value={row.pitch_count}
@@ -459,6 +450,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
         <Pressable
           onPress={() => {
             setPitchBreakdown((current) => [...current, createBreakdownRow()]);
+            setValidationError(null);
           }}
           style={({ pressed }) => [styles.addRowButton, pressed && styles.pressed]}
         >

@@ -1,11 +1,25 @@
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
+  generateClientId,
+  getLocalPitcherByIdForCoach,
+  listLocalPitchersForCoach,
+  upsertLocalPitcher,
+  upsertLocalPitchers,
+} from '@/services/localData';
+import {
+  getIsOnline,
+  processPendingSyncQueueForCoach,
+  queueLocalSyncMutation,
+  refreshPendingSyncCount,
+} from '@/services/sync';
+import {
   DevelopmentPhase,
   Handedness,
   PitcherProfile,
   PitcherProfileInsert,
   PitcherProfileUpdate,
 } from '@/types/models';
+import { validatePitcherProfileInput } from '@/utils/validation';
 
 export type PitcherProfileInput = {
   first_name: string;
@@ -13,6 +27,7 @@ export type PitcherProfileInput = {
   age: number | null;
   grade: string | null;
   level_team: string | null;
+  target_game_ready_date: string | null;
   handedness: Handedness;
   pitch_arsenal: string[];
   development_phase: DevelopmentPhase;
@@ -20,15 +35,11 @@ export type PitcherProfileInput = {
   notes: string | null;
 };
 
-function assertSupabaseConfigured() {
-  if (!isSupabaseConfigured) {
-    throw new Error(
-      'Supabase is not configured yet. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to continue.'
-    );
-  }
-}
-
 const supabaseClient = supabase as any;
+
+function canUseRemote() {
+  return isSupabaseConfigured && getIsOnline();
+}
 
 function normalizePitcherInput(input: PitcherProfileInput): PitcherProfileInput {
   return {
@@ -37,13 +48,12 @@ function normalizePitcherInput(input: PitcherProfileInput): PitcherProfileInput 
     age: input.age,
     grade: input.grade?.trim() ? input.grade.trim() : null,
     level_team: input.level_team?.trim() ? input.level_team.trim() : null,
+    target_game_ready_date: input.target_game_ready_date?.trim()
+      ? input.target_game_ready_date.trim()
+      : null,
     handedness: input.handedness,
     pitch_arsenal: Array.from(
-      new Set(
-        input.pitch_arsenal
-          .map((pitch) => pitch.trim())
-          .filter(Boolean)
-      )
+      new Set(input.pitch_arsenal.map((pitch) => pitch.trim()).filter(Boolean))
     ),
     development_phase: input.development_phase,
     primary_goals: input.primary_goals?.trim() ? input.primary_goals.trim() : null,
@@ -51,13 +61,7 @@ function normalizePitcherInput(input: PitcherProfileInput): PitcherProfileInput 
   };
 }
 
-export function formatPitcherName(pitcher: Pick<PitcherProfile, 'first_name' | 'last_name'>) {
-  return `${pitcher.first_name} ${pitcher.last_name}`.trim();
-}
-
-export async function listPitchersForCoach(coachId: string) {
-  assertSupabaseConfigured();
-
+async function fetchPitchersFromRemote(coachId: string) {
   const { data, error } = await supabaseClient
     .from('pitcher_profiles')
     .select('*')
@@ -72,9 +76,7 @@ export async function listPitchersForCoach(coachId: string) {
   return (data ?? []) as PitcherProfile[];
 }
 
-export async function getPitcherByIdForCoach(pitcherId: string, coachId: string) {
-  assertSupabaseConfigured();
-
+async function fetchPitcherFromRemote(coachId: string, pitcherId: string) {
   const { data, error } = await supabaseClient
     .from('pitcher_profiles')
     .select('*')
@@ -89,54 +91,201 @@ export async function getPitcherByIdForCoach(pitcherId: string, coachId: string)
   return (data ?? null) as PitcherProfile | null;
 }
 
-export async function createPitcherForCoach(
-  coachId: string,
-  input: PitcherProfileInput
-) {
-  assertSupabaseConfigured();
+async function triggerSyncIfOnline(coachId: string) {
+  if (!canUseRemote()) {
+    await refreshPendingSyncCount(coachId);
+    return;
+  }
+
+  await processPendingSyncQueueForCoach(coachId);
+  await refreshPendingSyncCount(coachId);
+}
+
+/**
+ * Formats a pitcher name for roster and detail views.
+ *
+ * @param pitcher - object containing first and last name fields
+ * @returns display-friendly pitcher name
+ */
+export function formatPitcherName(pitcher: Pick<PitcherProfile, 'first_name' | 'last_name'>) {
+  return `${pitcher.first_name} ${pitcher.last_name}`.trim();
+}
+
+/**
+ * Lists all pitchers owned by a coach, preferring local cache first.
+ *
+ * @param coachId - authenticated coach id
+ * @returns coach-owned pitchers ordered for roster display
+ */
+export async function listPitchersForCoach(coachId: string) {
+  const localPitchers = await listLocalPitchersForCoach(coachId);
+
+  if (!canUseRemote()) {
+    return localPitchers;
+  }
+
+  try {
+    const remotePitchers = await fetchPitchersFromRemote(coachId);
+    await upsertLocalPitchers(coachId, remotePitchers, 'synced');
+    return listLocalPitchersForCoach(coachId);
+  } catch (error) {
+    if (localPitchers.length) {
+      return localPitchers;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Loads one coach-owned pitcher profile with local fallback support.
+ *
+ * @param pitcherId - pitcher profile id
+ * @param coachId - authenticated coach id
+ * @returns pitcher profile when found, otherwise null
+ */
+export async function getPitcherByIdForCoach(pitcherId: string, coachId: string) {
+  const localPitcher = await getLocalPitcherByIdForCoach(coachId, pitcherId);
+
+  if (!canUseRemote()) {
+    return localPitcher;
+  }
+
+  try {
+    const remotePitcher = await fetchPitcherFromRemote(coachId, pitcherId);
+
+    if (remotePitcher) {
+      await upsertLocalPitcher(coachId, remotePitcher, 'synced');
+    }
+
+    return remotePitcher ?? localPitcher;
+  } catch (error) {
+    if (localPitcher) {
+      return localPitcher;
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * Creates a pitcher profile under the signed-in coach and queues it for sync.
+ *
+ * @param coachId - authenticated coach id
+ * @param input - normalized pitcher profile input
+ * @returns locally persisted pitcher profile
+ */
+export async function createPitcherForCoach(coachId: string, input: PitcherProfileInput) {
+  const normalizedInput = normalizePitcherInput(input);
+  const validationError = validatePitcherProfileInput(normalizedInput);
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const now = new Date().toISOString();
+
+  const pitcher: PitcherProfile = {
+    id: generateClientId('pitcher'),
+    created_by: coachId,
+    first_name: normalizedInput.first_name,
+    last_name: normalizedInput.last_name,
+    age: normalizedInput.age,
+    grade: normalizedInput.grade,
+    level_team: normalizedInput.level_team,
+    target_game_ready_date: normalizedInput.target_game_ready_date,
+    handedness: normalizedInput.handedness,
+    pitch_arsenal: normalizedInput.pitch_arsenal,
+    development_phase: normalizedInput.development_phase,
+    primary_goals: normalizedInput.primary_goals,
+    notes: normalizedInput.notes,
+    created_at: now,
+    updated_at: now,
+  };
 
   const payload: PitcherProfileInsert = {
-    ...normalizePitcherInput(input),
+    ...pitcher,
     created_by: coachId,
   };
 
-  const { data, error } = await supabaseClient
-    .from('pitcher_profiles')
-    .insert(payload)
-    .select('*')
-    .single();
+  await upsertLocalPitcher(coachId, pitcher, 'pending');
+  await queueLocalSyncMutation({
+    id: generateClientId('queue'),
+    coach_id: coachId,
+    mutation_type: 'create_pitcher',
+    entity_id: pitcher.id,
+    payload_json: JSON.stringify(payload),
+    status: 'pending',
+    created_at: now,
+    updated_at: now,
+  });
+  await triggerSyncIfOnline(coachId);
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return data as PitcherProfile;
+  return (await getLocalPitcherByIdForCoach(coachId, pitcher.id)) ?? pitcher;
 }
 
+/**
+ * Updates a coach-owned pitcher profile and stages the change for sync.
+ *
+ * @param pitcherId - pitcher profile id
+ * @param coachId - authenticated coach id
+ * @param input - updated pitcher values
+ * @returns latest locally available pitcher profile
+ */
 export async function updatePitcherForCoach(
   pitcherId: string,
   coachId: string,
   input: PitcherProfileInput
 ) {
-  assertSupabaseConfigured();
+  const existingPitcher = await getPitcherByIdForCoach(pitcherId, coachId);
 
-  const payload: PitcherProfileUpdate = normalizePitcherInput(input);
-
-  const { data, error } = await supabaseClient
-    .from('pitcher_profiles')
-    .update(payload)
-    .eq('id', pitcherId)
-    .eq('created_by', coachId)
-    .select('*')
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!data) {
+  if (!existingPitcher) {
     throw new Error('Pitcher profile not found.');
   }
 
-  return data as PitcherProfile;
+  const normalizedInput = normalizePitcherInput(input);
+  const validationError = validatePitcherProfileInput(normalizedInput);
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const updatedPitcher: PitcherProfile = {
+    ...existingPitcher,
+    ...normalizedInput,
+    id: pitcherId,
+    created_by: coachId,
+    updated_at: new Date().toISOString(),
+  };
+
+  const payload: PitcherProfileUpdate & { id: string } = {
+    id: pitcherId,
+    first_name: updatedPitcher.first_name,
+    last_name: updatedPitcher.last_name,
+    age: updatedPitcher.age,
+    grade: updatedPitcher.grade,
+    level_team: updatedPitcher.level_team,
+    target_game_ready_date: updatedPitcher.target_game_ready_date,
+    handedness: updatedPitcher.handedness,
+    pitch_arsenal: updatedPitcher.pitch_arsenal,
+    development_phase: updatedPitcher.development_phase,
+    primary_goals: updatedPitcher.primary_goals,
+    notes: updatedPitcher.notes,
+    updated_at: updatedPitcher.updated_at,
+  };
+
+  await upsertLocalPitcher(coachId, updatedPitcher, 'pending');
+  await queueLocalSyncMutation({
+    id: generateClientId('queue'),
+    coach_id: coachId,
+    mutation_type: 'update_pitcher',
+    entity_id: pitcherId,
+    payload_json: JSON.stringify(payload),
+    status: 'pending',
+    created_at: updatedPitcher.updated_at,
+    updated_at: updatedPitcher.updated_at,
+  });
+  await triggerSyncIfOnline(coachId);
+
+  return (await getLocalPitcherByIdForCoach(coachId, pitcherId)) ?? updatedPitcher;
 }

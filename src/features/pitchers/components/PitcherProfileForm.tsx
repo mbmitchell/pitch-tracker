@@ -1,3 +1,4 @@
+import { DatePickerField } from '@/components/DatePickerField';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -6,6 +7,7 @@ import { SectionCard } from '@/components/SectionCard';
 import { TextField } from '@/components/TextField';
 import { DevelopmentPhase, Handedness, PitcherProfile } from '@/types/models';
 import { colors, spacing } from '@/utils/theme';
+import { validatePitcherProfileInput } from '@/utils/validation';
 
 import { OptionChipGroup } from './OptionChipGroup';
 
@@ -43,6 +45,7 @@ type PitcherProfileFormValues = {
   age: string;
   grade: string;
   levelTeam: string;
+  targetGameReadyDate: string;
   handedness: Handedness | null;
   pitchArsenalText: string;
   developmentPhase: DevelopmentPhase | null;
@@ -65,6 +68,7 @@ function buildInitialValues(pitcher?: PitcherProfile | null): PitcherProfileForm
     age: pitcher?.age ? String(pitcher.age) : '',
     grade: pitcher?.grade ?? '',
     levelTeam: pitcher?.level_team ?? '',
+    targetGameReadyDate: pitcher?.target_game_ready_date ?? '',
     handedness: pitcher?.handedness ?? null,
     pitchArsenalText: pitcher?.pitch_arsenal?.join(', ') ?? '',
     developmentPhase: pitcher?.development_phase ?? null,
@@ -84,43 +88,8 @@ function normalizePitchArsenal(value: string) {
   );
 }
 
-function togglePitchArsenalValue(currentValue: string, nextPitch: string) {
-  const current = normalizePitchArsenal(currentValue);
-  const exists = current.includes(nextPitch);
-
-  const next = exists
-    ? current.filter((pitch) => pitch !== nextPitch)
-    : [...current, nextPitch];
-
-  return next.join(', ');
-}
-
 function validatePitcherForm(values: PitcherProfileFormValues) {
-  if (!values.firstName.trim()) {
-    return 'First name is required.';
-  }
-
-  if (!values.lastName.trim()) {
-    return 'Last name is required.';
-  }
-
-  if (values.age.trim()) {
-    const parsedAge = Number(values.age);
-
-    if (!Number.isInteger(parsedAge) || parsedAge < 5 || parsedAge > 30) {
-      return 'Age must be a whole number between 5 and 30.';
-    }
-  }
-
-  if (!values.handedness) {
-    return 'Select a handedness.';
-  }
-
-  if (!values.developmentPhase) {
-    return 'Select a development phase.';
-  }
-
-  return null;
+  return validatePitcherProfileInput(toPitcherProfileInput(values));
 }
 
 function toPitcherProfileInput(values: PitcherProfileFormValues): PitcherProfileInput {
@@ -130,6 +99,9 @@ function toPitcherProfileInput(values: PitcherProfileFormValues): PitcherProfile
     age: values.age.trim() ? Number(values.age) : null,
     grade: values.grade,
     level_team: values.levelTeam,
+    target_game_ready_date: values.targetGameReadyDate.trim()
+      ? values.targetGameReadyDate.trim()
+      : null,
     handedness: values.handedness ?? 'RHP',
     pitch_arsenal: normalizePitchArsenal(values.pitchArsenalText),
     development_phase: values.developmentPhase ?? 'assessment',
@@ -138,6 +110,11 @@ function toPitcherProfileInput(values: PitcherProfileFormValues): PitcherProfile
   };
 }
 
+/**
+ * Renders the shared pitcher profile form used for create and edit flows.
+ *
+ * Validation stays centralized so the create and edit screens behave the same way.
+ */
 export function PitcherProfileForm({
   initialPitcher,
   isSubmitting = false,
@@ -235,6 +212,22 @@ export function PitcherProfileForm({
           }}
           placeholder="16U Gold"
           value={values.levelTeam}
+        />
+
+        <DatePickerField
+          clearable
+          helperText="Optional. Used for preseason build-up guidance."
+          label="Target Game-Ready Date"
+          onChange={(targetGameReadyDate) => {
+            setValues((current) => ({
+              ...current,
+              targetGameReadyDate: targetGameReadyDate ?? '',
+            }));
+            if (currentError) {
+              setValidationError(null);
+            }
+          }}
+          value={values.targetGameReadyDate || null}
         />
 
         <OptionChipGroup

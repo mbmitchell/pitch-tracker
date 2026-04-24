@@ -16,6 +16,7 @@ type OptionChipGroupProps = {
   onChange: (value: string | string[]) => void;
 };
 
+/** Renders a compact chip-based selector used throughout pitcher and event forms. */
 export function OptionChipGroup({
   label,
   multiple = false,

@@ -12,9 +12,18 @@ import { listThrowingEventsForPitcher, ThrowingEventRecord } from '@/services/ev
 import { formatPitcherName } from '@/services/pitchers';
 import { PitcherProfile } from '@/types/models';
 import {
+  buildSuggestedPreseasonPhaseContext,
+  formatArmFeelLabel,
   buildWorkloadSummary,
+  formatBullpenFocusLabel,
   formatDateLabel,
+  formatDaysSinceLabel,
+  formatDevelopmentPhaseLabel,
   formatEventTypeLabel,
+  formatIntensityLabel,
+  formatPitchCountLabel,
+  formatSuggestedPreseasonPhaseLabel,
+  formatTargetGameReadyCountdownLabel,
   summarizePitchBreakdown,
 } from '@/utils/workload';
 import { colors, spacing } from '@/utils/theme';
@@ -23,14 +32,11 @@ type PitcherDetailScreenProps = {
   pitcherId: string;
 };
 
-function formatDevelopmentPhase(value: PitcherProfile['development_phase']) {
-  return value.replace('_', ' ');
-}
-
 function formatSummaryEventDate(value: ThrowingEventRecord | null) {
   return value ? formatDateLabel(value.date) : 'No event logged';
 }
 
+/** Renders pitcher profile details together with recent workload history. */
 export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
   const router = useRouter();
   const isFocused = useIsFocused();
@@ -39,6 +45,7 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
   const [events, setEvents] = useState<ThrowingEventRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     async function loadPitcherDetail() {
@@ -63,13 +70,13 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
     }
 
     void loadPitcherDetail();
-  }, [isFocused, pitcherId, user?.id]);
+  }, [isFocused, pitcherId, refreshToken, user?.id]);
 
   if (isLoading) {
     return (
       <FullScreenLoader
         title="Loading pitcher"
-        subtitle="Pulling this roster profile and recent throwing history from Supabase."
+        subtitle="Loading this roster profile and recent throwing history."
       />
     );
   }
@@ -79,6 +86,15 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
       <Screen title="Pitcher unavailable" subtitle="This roster entry could not be opened.">
         <SectionCard title="Roster">
           <Text style={styles.copy}>{error ?? 'Pitcher profile not found.'}</Text>
+          <PrimaryButton
+            label="Try again"
+            onPress={() => {
+              setIsLoading(true);
+              setError(null);
+              setRefreshToken((value) => value + 1);
+            }}
+            tone="secondary"
+          />
           <PrimaryButton label="Back to pitchers" onPress={() => router.replace('/pitchers')} />
         </SectionCard>
       </Screen>
@@ -86,6 +102,9 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
   }
 
   const summary = buildWorkloadSummary(events);
+  const suggestedPreseasonPhase = buildSuggestedPreseasonPhaseContext(
+    pitcher.target_game_ready_date
+  );
 
   return (
     <Screen
@@ -106,6 +125,14 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
           <Text style={styles.metricValue}>{pitcher.level_team ?? 'Not entered'}</Text>
         </View>
         <View style={styles.metricRow}>
+          <Text style={styles.metricLabel}>Target Game-Ready Date</Text>
+          <Text style={styles.metricValue}>
+            {pitcher.target_game_ready_date
+              ? formatDateLabel(pitcher.target_game_ready_date)
+              : 'Not set'}
+          </Text>
+        </View>
+        <View style={styles.metricRow}>
           <Text style={styles.metricLabel}>Handedness</Text>
           <Text style={styles.metricValue}>{pitcher.handedness}</Text>
         </View>
@@ -113,11 +140,27 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
 
       <SectionCard title="Development">
         <View style={styles.metricRow}>
-          <Text style={styles.metricLabel}>Phase</Text>
+          <Text style={styles.metricLabel}>Coach-selected phase</Text>
           <Text style={styles.metricValue}>
-            {formatDevelopmentPhase(pitcher.development_phase)}
+            {formatDevelopmentPhaseLabel(pitcher.development_phase)}
           </Text>
         </View>
+        <View style={styles.metricRow}>
+          <Text style={styles.metricLabel}>Suggested preseason phase</Text>
+          <Text style={styles.metricValue}>
+            {suggestedPreseasonPhase
+              ? formatSuggestedPreseasonPhaseLabel(
+                  suggestedPreseasonPhase.suggested_phase
+                )
+              : 'Target date not set'}
+          </Text>
+        </View>
+        {suggestedPreseasonPhase ? (
+          <Text style={styles.copy}>
+            Based on the target date, the pitcher is{' '}
+            {formatTargetGameReadyCountdownLabel(suggestedPreseasonPhase)}.
+          </Text>
+        ) : null}
         <Text style={styles.copy}>
           Arsenal: {pitcher.pitch_arsenal.length ? pitcher.pitch_arsenal.join(', ') : 'No arsenal entered'}
         </Text>
@@ -138,9 +181,7 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
         </View>
         <View style={styles.metricRow}>
           <Text style={styles.metricLabel}>Days since last throw</Text>
-          <Text style={styles.metricValue}>
-            {summary.daysSinceLastThrowingEvent ?? 'No events yet'}
-          </Text>
+          <Text style={styles.metricValue}>{formatDaysSinceLabel(summary.daysSinceLastThrowingEvent)}</Text>
         </View>
       </SectionCard>
 
@@ -168,15 +209,14 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
                   <Text style={styles.historyTitle}>{formatEventTypeLabel(event.event_type)}</Text>
                   <Text style={styles.historyMeta}>{formatDateLabel(event.date)}</Text>
                 </View>
-                <Text style={styles.historyMeta}>
-                  {event.total_pitches ?? 0} pitches
-                </Text>
+                <Text style={styles.historyMeta}>{formatPitchCountLabel(event.total_pitches)}</Text>
               </View>
               <Text style={styles.copy}>
-                Intensity: {event.intensity} • Arm feel: {event.arm_feel}
+                Intensity: {formatIntensityLabel(event.intensity)} • Arm feel:{' '}
+                {formatArmFeelLabel(event.arm_feel)}
               </Text>
               <Text style={styles.copy}>
-                Innings: {event.innings_thrown ?? 'N/A'} • Bullpen focus: {event.bullpen_focus ?? 'N/A'}
+                Innings: {event.innings_thrown ?? 'N/A'} • Bullpen focus: {formatBullpenFocusLabel(event.bullpen_focus)}
               </Text>
               <Text style={styles.copy}>
                 Breakdown: {summarizePitchBreakdown(event)}

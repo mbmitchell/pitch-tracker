@@ -1,41 +1,83 @@
 import { ReactNode } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SyncStatusBanner } from '@/components/SyncStatusBanner';
 import { colors, spacing } from '@/utils/theme';
 
 type ScreenProps = {
   title: string;
   subtitle?: string;
   children: ReactNode;
+  keyboardAware?: boolean;
+  keyboardVerticalOffset?: number;
+  contentContainerStyle?: StyleProp<ViewStyle>;
 };
 
-export function Screen({ title, subtitle, children }: ScreenProps) {
+export function Screen({
+  title,
+  subtitle,
+  children,
+  keyboardAware = false,
+  keyboardVerticalOffset = 0,
+  contentContainerStyle,
+}: ScreenProps) {
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={keyboardAware}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+        style={styles.flex}
       >
-        <View style={styles.header}>
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        </View>
-        {children}
-      </ScrollView>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            keyboardAware ? styles.keyboardAwareContent : null,
+            contentContainerStyle,
+          ]}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          style={styles.flex}
+        >
+          <View style={styles.header}>
+            <SyncStatusBanner />
+            <Text style={styles.title}>{title}</Text>
+            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          </View>
+          {children}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
   },
   content: {
+    flexGrow: 1,
     padding: spacing.lg,
     paddingBottom: spacing.xxl,
     gap: spacing.md,
+  },
+  keyboardAwareContent: {
+    paddingBottom: 48,
   },
   header: {
     gap: spacing.xs,
