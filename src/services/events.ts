@@ -141,6 +141,39 @@ async function fetchThrowingEventsForCoachFromRemote(coachId: string, limit: num
   return (data ?? []) as ThrowingEvent[];
 }
 
+async function createThrowingEventInRemote(payload: ThrowingEventInsert) {
+  const { data, error } = await supabaseClient
+    .from('throwing_events')
+    .insert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as ThrowingEvent;
+}
+
+async function createPitchBreakdownRowsInRemote(
+  payload: EventPitchBreakdownInsert[]
+) {
+  if (!payload.length) {
+    return [] as EventPitchBreakdown[];
+  }
+
+  const { data, error } = await supabaseClient
+    .from('event_pitch_breakdown')
+    .insert(payload)
+    .select('*');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as EventPitchBreakdown[];
+}
+
 async function hydrateLocalPitcherEvents(
   coachId: string,
   pitcherId: string,
@@ -312,6 +345,31 @@ export async function createThrowingEventForCoach(
   );
 
   const eventPayload: ThrowingEventInsert = { ...event };
+  const breakdownPayload = breakdownRows.map<EventPitchBreakdownInsert>((row) => ({ ...row }));
+
+  if (canUseRemote()) {
+    const createdEvent = await createThrowingEventInRemote(eventPayload);
+    const createdBreakdownRows = await createPitchBreakdownRowsInRemote(breakdownPayload);
+
+    await upsertLocalThrowingEvent(coachId, createdEvent, 'synced');
+
+    if (createdBreakdownRows.length) {
+      await replaceLocalPitchBreakdownForEvent(
+        coachId,
+        createdEvent.id,
+        createdBreakdownRows,
+        'synced'
+      );
+    }
+
+    await triggerSyncIfOnline(coachId);
+
+    return {
+      event: createdEvent,
+      event_pitch_breakdown: createdBreakdownRows,
+      pitcher,
+    };
+  }
 
   await upsertLocalThrowingEvent(coachId, event, 'pending');
   await queueLocalSyncMutation({
@@ -329,13 +387,12 @@ export async function createThrowingEventForCoach(
     await upsertLocalPitchBreakdownRows(coachId, breakdownRows, 'pending');
 
     for (const row of breakdownRows) {
-      const breakdownPayload: EventPitchBreakdownInsert = { ...row };
       await queueLocalSyncMutation({
         id: generateClientId('queue'),
         coach_id: coachId,
         mutation_type: 'create_pitch_breakdown',
         entity_id: row.id,
-        payload_json: JSON.stringify(breakdownPayload),
+        payload_json: JSON.stringify({ ...row } satisfies EventPitchBreakdownInsert),
         status: 'pending',
         created_at: now,
         updated_at: now,

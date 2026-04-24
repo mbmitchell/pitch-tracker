@@ -90,6 +90,20 @@ async function fetchPitcherFromRemote(coachId: string, pitcherId: string) {
   return (data ?? null) as PitcherProfile | null;
 }
 
+async function createPitcherInRemote(payload: PitcherProfileInsert) {
+  const { data, error } = await supabaseClient
+    .from('pitcher_profiles')
+    .insert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as PitcherProfile;
+}
+
 /**
  * Writes remote pitcher data into the local cache.
  *
@@ -232,6 +246,13 @@ export async function createPitcherForCoach(coachId: string, input: PitcherProfi
     ...pitcher,
     created_by: coachId,
   };
+
+  if (canUseRemote()) {
+    const createdPitcher = await createPitcherInRemote(payload);
+    await upsertLocalPitcher(coachId, createdPitcher, 'synced');
+    await triggerSyncIfOnline(coachId);
+    return createdPitcher;
+  }
 
   await upsertLocalPitcher(coachId, pitcher, 'pending');
   await queueLocalSyncMutation({
