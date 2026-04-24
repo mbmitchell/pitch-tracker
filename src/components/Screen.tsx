@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SyncStatusBanner } from '@/components/SyncStatusBanner';
 import { colors, spacing } from '@/utils/theme';
 
 type ScreenProps = {
@@ -51,7 +50,6 @@ export function Screen({
           style={styles.flex}
         >
           <View style={styles.header}>
-            <SyncStatusBanner />
             <Text style={styles.title}>{title}</Text>
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
           </View>

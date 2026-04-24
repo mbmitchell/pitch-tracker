@@ -1,7 +1,9 @@
 import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
 
+import { AppShellSyncStatus } from '@/components/AppShellSyncStatus';
 import { FullScreenLoader } from '@/components/FullScreenLoader';
 import { HomeHeaderButton } from '@/components/HomeHeaderButton';
 import { AuthProvider, useAuth } from '@/services/auth';
@@ -44,7 +46,7 @@ function RootNavigator() {
   }
 
   return (
-    <>
+    <View style={styles.container}>
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
@@ -82,7 +84,8 @@ function RootNavigator() {
           options={{ title: 'Recommendations', headerRight: homeHeaderRight }}
         />
       </Stack>
-    </>
+      <AppShellSyncStatus />
+    </View>
   );
 }
 
@@ -95,3 +98,9 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});

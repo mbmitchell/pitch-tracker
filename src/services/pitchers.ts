@@ -8,7 +8,6 @@ import {
 } from '@/services/localData';
 import {
   getIsOnline,
-  processPendingSyncQueueForCoach,
   queueLocalSyncMutation,
   refreshPendingSyncCount,
 } from '@/services/sync';
@@ -92,12 +91,6 @@ async function fetchPitcherFromRemote(coachId: string, pitcherId: string) {
 }
 
 async function triggerSyncIfOnline(coachId: string) {
-  if (!canUseRemote()) {
-    await refreshPendingSyncCount(coachId);
-    return;
-  }
-
-  await processPendingSyncQueueForCoach(coachId);
   await refreshPendingSyncCount(coachId);
 }
 

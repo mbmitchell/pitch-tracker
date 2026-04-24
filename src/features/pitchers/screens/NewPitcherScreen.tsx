@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { SyncStatusBanner } from '@/components/SyncStatusBanner';
 import { PitcherProfileForm } from '@/features/pitchers/components/PitcherProfileForm';
 import { useAuth } from '@/services/auth';
 import { createPitcherForCoach } from '@/services/pitchers';
@@ -65,7 +64,6 @@ export function NewPitcherScreen() {
           style={styles.flex}
         >
           <View style={styles.header}>
-            <SyncStatusBanner />
             <Text style={styles.title}>Add pitcher</Text>
             <Text style={styles.subtitle}>
               Capture the essentials quickly so roster management stays useful during

@@ -16,7 +16,6 @@ import { FullScreenLoader } from '@/components/FullScreenLoader';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { SectionCard } from '@/components/SectionCard';
-import { SyncStatusBanner } from '@/components/SyncStatusBanner';
 import { PitcherProfileForm } from '@/features/pitchers/components/PitcherProfileForm';
 import { useAuth } from '@/services/auth';
 import { getPitcherByIdForCoach, updatePitcherForCoach } from '@/services/pitchers';
@@ -141,7 +140,6 @@ export function EditPitcherScreen({ pitcherId }: EditPitcherScreenProps) {
           style={styles.flex}
         >
           <View style={styles.header}>
-            <SyncStatusBanner />
             <Text style={styles.title}>Edit {formatPitcherName(pitcher)}</Text>
             <Text style={styles.subtitle}>
               Update roster details quickly and keep development context current.

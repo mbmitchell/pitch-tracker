@@ -1,30 +1,11 @@
 import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   countUnsyncedQueueEntries,
   enqueueLocalSyncMutation,
   listLocalSyncQueueEntries,
-  LocalQueueEntry,
-  LocalSyncState,
-  updateLocalPitchBreakdownSyncState,
-  updateLocalPitcherSyncState,
-  updateLocalSyncQueueEntry,
-  updateLocalThrowingEventSyncState,
-  upsertLocalPitchBreakdownRows,
-  upsertLocalPitcher,
-  upsertLocalThrowingEvent,
 } from '@/services/localData';
-import {
-  EventPitchBreakdown,
-  EventPitchBreakdownInsert,
-  PitcherProfile,
-  PitcherProfileInsert,
-  PitcherProfileUpdate,
-  ThrowingEvent,
-  ThrowingEventInsert,
-} from '@/types/models';
 import { useAuth } from '@/services/auth';
 
 type SyncIndicatorState = {
@@ -37,15 +18,10 @@ type SyncIndicatorState = {
 const SyncContext = createContext<SyncIndicatorState | null>(null);
 
 let onlineState = true;
-const syncingByCoach = new Map<string, Promise<void>>();
 const syncListeners = new Set<() => void>();
 
 function notifySyncListeners() {
   syncListeners.forEach((listener) => listener());
-}
-
-function getSupabaseClient() {
-  return supabase as any;
 }
 
 /**
@@ -67,152 +43,15 @@ export async function refreshPendingSyncCount(coachId: string) {
   return countUnsyncedQueueEntries(coachId);
 }
 
-async function syncCreatePitcher(coachId: string, queueEntry: LocalQueueEntry) {
-  const supabaseClient = getSupabaseClient();
-  const payload = JSON.parse(queueEntry.payload_json) as PitcherProfileInsert;
-
-  const { data, error } = await supabaseClient
-    .from('pitcher_profiles')
-    .insert(payload)
-    .select('*')
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await upsertLocalPitcher(coachId, data as PitcherProfile, 'synced');
-  await updateLocalPitcherSyncState(queueEntry.entity_id, 'synced');
-}
-
-async function syncUpdatePitcher(coachId: string, queueEntry: LocalQueueEntry) {
-  const supabaseClient = getSupabaseClient();
-  const payload = JSON.parse(queueEntry.payload_json) as PitcherProfileUpdate & {
-    id: string;
-  };
-
-  const { data, error } = await supabaseClient
-    .from('pitcher_profiles')
-    .update(payload)
-    .eq('id', payload.id)
-    .eq('created_by', coachId)
-    .select('*')
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  if (!data) {
-    throw new Error('Pitcher profile not found during sync.');
-  }
-
-  await upsertLocalPitcher(coachId, data as PitcherProfile, 'synced');
-  await updateLocalPitcherSyncState(queueEntry.entity_id, 'synced');
-}
-
-async function syncCreateThrowingEvent(coachId: string, queueEntry: LocalQueueEntry) {
-  const supabaseClient = getSupabaseClient();
-  const payload = JSON.parse(queueEntry.payload_json) as ThrowingEventInsert;
-
-  const { data, error } = await supabaseClient
-    .from('throwing_events')
-    .insert(payload)
-    .select('*')
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await upsertLocalThrowingEvent(coachId, data as ThrowingEvent, 'synced');
-  await updateLocalThrowingEventSyncState(queueEntry.entity_id, 'synced');
-}
-
-async function syncCreatePitchBreakdown(coachId: string, queueEntry: LocalQueueEntry) {
-  const supabaseClient = getSupabaseClient();
-  const payload = JSON.parse(queueEntry.payload_json) as EventPitchBreakdownInsert;
-
-  const { data, error } = await supabaseClient
-    .from('event_pitch_breakdown')
-    .insert(payload)
-    .select('*')
-    .single();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  await upsertLocalPitchBreakdownRows(coachId, [data as EventPitchBreakdown], 'synced');
-  await updateLocalPitchBreakdownSyncState(queueEntry.entity_id, 'synced');
-}
-
-async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
-  await updateLocalSyncQueueEntry(queueEntry.id, 'syncing', null, queueEntry.retry_count);
-
-  switch (queueEntry.mutation_type) {
-    case 'create_pitcher':
-      await syncCreatePitcher(coachId, queueEntry);
-      break;
-    case 'update_pitcher':
-      await syncUpdatePitcher(coachId, queueEntry);
-      break;
-    case 'create_throwing_event':
-      await syncCreateThrowingEvent(coachId, queueEntry);
-      break;
-    case 'create_pitch_breakdown':
-      await syncCreatePitchBreakdown(coachId, queueEntry);
-      break;
-    default:
-      throw new Error(`Unsupported sync mutation: ${queueEntry.mutation_type}`);
-  }
-
-  await updateLocalSyncQueueEntry(queueEntry.id, 'synced');
-}
-
 /**
- * Processes queued local mutations for a coach in FIFO order.
- *
- * Queue order matters because offline-created parents must sync before child rows
- * that reference them, so the processor stops on the first failure instead of
- * skipping ahead and creating harder-to-debug state drift.
+ * Placeholder for future queue processing.
  *
  * @param coachId - authenticated coach id
  */
 export async function processPendingSyncQueueForCoach(coachId: string) {
-  if (!coachId || !getIsOnline() || !isSupabaseConfigured) {
-    return;
-  }
-
-  const existing = syncingByCoach.get(coachId);
-  if (existing) {
-    return existing;
-  }
-
-  const syncPromise = (async () => {
-    const entries = await listLocalSyncQueueEntries(coachId);
-
-    for (const entry of entries) {
-      try {
-        await processQueueEntry(coachId, entry);
-      } catch (error) {
-        await updateLocalSyncQueueEntry(
-          entry.id,
-          'failed',
-          error instanceof Error ? error.message : 'Sync failed.',
-          entry.retry_count + 1
-        );
-        break;
-      }
-    }
-  })().finally(() => {
-    syncingByCoach.delete(coachId);
+  if (coachId) {
     notifySyncListeners();
-  });
-
-  syncingByCoach.set(coachId, syncPromise);
-  notifySyncListeners();
-  return syncPromise;
+  }
 }
 
 /**
@@ -291,11 +130,14 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const nextCount = await refreshPendingSyncCount(user.id);
+      const [nextCount, syncingEntries] = await Promise.all([
+        refreshPendingSyncCount(user.id),
+        listLocalSyncQueueEntries(user.id, ['syncing']),
+      ]);
 
       if (isActive) {
         setPendingCount(nextCount);
-        setIsSyncing(syncingByCoach.has(user.id));
+        setIsSyncing(syncingEntries.length > 0);
       }
     }
 
@@ -307,53 +149,6 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       syncListeners.delete(updatePendingState);
     };
   }, [user?.id]);
-
-  useEffect(() => {
-    let isActive = true;
-
-    async function syncIfNeeded() {
-      if (!user?.id || !isOnline || !isSupabaseConfigured) {
-        if (isActive) {
-          const nextCount = user?.id ? await refreshPendingSyncCount(user.id) : 0;
-          setPendingCount(nextCount);
-          setIsSyncing(false);
-        }
-        return;
-      }
-
-      const nextCount = await refreshPendingSyncCount(user.id);
-
-      if (isActive) {
-        setPendingCount(nextCount);
-        setIsSyncing(syncingByCoach.has(user.id));
-      }
-
-      if (!nextCount) {
-        return;
-      }
-
-      if (isActive) {
-        setIsSyncing(true);
-      }
-
-      try {
-        await processPendingSyncQueueForCoach(user.id);
-      } finally {
-        if (!isActive) {
-          return;
-        }
-
-        setIsSyncing(false);
-        setPendingCount(await refreshPendingSyncCount(user.id));
-      }
-    }
-
-    void syncIfNeeded();
-
-    return () => {
-      isActive = false;
-    };
-  }, [isOnline, user?.id]);
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
@@ -382,7 +177,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
  * @param queueEntry - queue record ready to persist
  */
 export async function queueLocalSyncMutation(
-  queueEntry: Omit<LocalQueueEntry, 'retry_count' | 'last_error'>
+  queueEntry: Parameters<typeof enqueueLocalSyncMutation>[0]
 ) {
   await enqueueLocalSyncMutation(queueEntry);
   notifySyncListeners();
