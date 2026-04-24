@@ -83,6 +83,10 @@ function RootNavigator() {
           name="recommendations/[pitcherId]"
           options={{ title: 'Recommendations', headerRight: homeHeaderRight }}
         />
+        <Stack.Screen
+          name="sync/index"
+          options={{ title: 'Sync Details', headerRight: homeHeaderRight }}
+        />
       </Stack>
       <AppShellSyncStatus />
     </View>

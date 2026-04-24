@@ -7,10 +7,9 @@ async function createDatabase() {
   const db = await openDatabaseAsync('bullpen-planner.db');
 
   if (!initialized) {
-    await db.execAsync(`
-      PRAGMA journal_mode = WAL;
-
-      CREATE TABLE IF NOT EXISTS cached_pitcher_profiles (
+    const schemaStatements = [
+      `PRAGMA journal_mode = WAL;`,
+      `CREATE TABLE IF NOT EXISTS cached_pitcher_profiles (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         created_by TEXT NOT NULL,
@@ -27,12 +26,10 @@ async function createDatabase() {
         notes TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_cached_pitcher_profiles_coach
-        ON cached_pitcher_profiles (coach_id, last_name, first_name);
-
-      CREATE TABLE IF NOT EXISTS cached_throwing_events (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_cached_pitcher_profiles_coach
+        ON cached_pitcher_profiles (coach_id, last_name, first_name);`,
+      `CREATE TABLE IF NOT EXISTS cached_throwing_events (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         pitcher_id TEXT NOT NULL,
@@ -48,26 +45,21 @@ async function createDatabase() {
         source_type TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_cached_throwing_events_coach_date
-        ON cached_throwing_events (coach_id, date DESC, created_at DESC);
-
-      CREATE INDEX IF NOT EXISTS idx_cached_throwing_events_pitcher
-        ON cached_throwing_events (pitcher_id, date DESC, created_at DESC);
-
-      CREATE TABLE IF NOT EXISTS cached_event_pitch_breakdown (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_cached_throwing_events_coach_date
+        ON cached_throwing_events (coach_id, date DESC, created_at DESC);`,
+      `CREATE INDEX IF NOT EXISTS idx_cached_throwing_events_pitcher
+        ON cached_throwing_events (pitcher_id, date DESC, created_at DESC);`,
+      `CREATE TABLE IF NOT EXISTS cached_event_pitch_breakdown (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
         pitch_type TEXT NOT NULL,
         pitch_count INTEGER NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_cached_event_pitch_breakdown_event
-        ON cached_event_pitch_breakdown (event_id);
-
-      CREATE TABLE IF NOT EXISTS sync_queue (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_cached_event_pitch_breakdown_event
+        ON cached_event_pitch_breakdown (event_id);`,
+      `CREATE TABLE IF NOT EXISTS sync_queue (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         mutation_type TEXT NOT NULL,
@@ -79,12 +71,10 @@ async function createDatabase() {
         last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_sync_queue_coach_status
-        ON sync_queue (coach_id, status, created_at);
-
-      CREATE TABLE IF NOT EXISTS local_pitcher_profiles (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_sync_queue_coach_status
+        ON sync_queue (coach_id, status, created_at);`,
+      `CREATE TABLE IF NOT EXISTS local_pitcher_profiles (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         created_by TEXT NOT NULL,
@@ -102,12 +92,10 @@ async function createDatabase() {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         sync_state TEXT NOT NULL DEFAULT 'synced'
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_local_pitcher_profiles_coach
-        ON local_pitcher_profiles (coach_id, last_name, first_name);
-
-      CREATE TABLE IF NOT EXISTS local_throwing_events (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_local_pitcher_profiles_coach
+        ON local_pitcher_profiles (coach_id, last_name, first_name);`,
+      `CREATE TABLE IF NOT EXISTS local_throwing_events (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         pitcher_id TEXT NOT NULL,
@@ -124,27 +112,22 @@ async function createDatabase() {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         sync_state TEXT NOT NULL DEFAULT 'synced'
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_local_throwing_events_coach_date
-        ON local_throwing_events (coach_id, date DESC, created_at DESC);
-
-      CREATE INDEX IF NOT EXISTS idx_local_throwing_events_pitcher
-        ON local_throwing_events (pitcher_id, date DESC, created_at DESC);
-
-      CREATE TABLE IF NOT EXISTS local_event_pitch_breakdown (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_local_throwing_events_coach_date
+        ON local_throwing_events (coach_id, date DESC, created_at DESC);`,
+      `CREATE INDEX IF NOT EXISTS idx_local_throwing_events_pitcher
+        ON local_throwing_events (pitcher_id, date DESC, created_at DESC);`,
+      `CREATE TABLE IF NOT EXISTS local_event_pitch_breakdown (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
         pitch_type TEXT NOT NULL,
         pitch_count INTEGER NOT NULL,
         sync_state TEXT NOT NULL DEFAULT 'synced'
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_local_event_pitch_breakdown_event
-        ON local_event_pitch_breakdown (event_id);
-
-      CREATE TABLE IF NOT EXISTS local_sync_queue (
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_local_event_pitch_breakdown_event
+        ON local_event_pitch_breakdown (event_id);`,
+      `CREATE TABLE IF NOT EXISTS local_sync_queue (
         id TEXT PRIMARY KEY NOT NULL,
         coach_id TEXT NOT NULL,
         mutation_type TEXT NOT NULL,
@@ -155,11 +138,21 @@ async function createDatabase() {
         last_error TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
-      );
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_local_sync_queue_coach_status
+        ON local_sync_queue (coach_id, status, created_at);`,
+    ];
 
-      CREATE INDEX IF NOT EXISTS idx_local_sync_queue_coach_status
-        ON local_sync_queue (coach_id, status, created_at);
-    `);
+    for (const [index, statement] of schemaStatements.entries()) {
+      try {
+        await db.execAsync(statement);
+      } catch (error) {
+        throw new Error(
+          `Offline database schema statement ${index + 1} failed: ${statement}`,
+          { cause: error }
+        );
+      }
+    }
 
     const pitcherProfileColumns = await db.getAllAsync<{ name: string }>(
       `PRAGMA table_info(local_pitcher_profiles)`

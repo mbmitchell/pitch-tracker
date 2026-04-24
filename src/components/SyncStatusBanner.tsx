@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAuth } from '@/services/auth';
 import { useSyncStatus } from '@/services/sync';
@@ -6,6 +6,7 @@ import { colors, spacing } from '@/utils/theme';
 
 type SyncStatusBannerProps = {
   floating?: boolean;
+  onPress?: () => void;
 };
 
 function bannerTone({
@@ -46,7 +47,10 @@ function bannerTone({
   };
 }
 
-export function SyncStatusBanner({ floating = false }: SyncStatusBannerProps) {
+export function SyncStatusBanner({
+  floating = false,
+  onPress,
+}: SyncStatusBannerProps) {
   const { isAuthenticated } = useAuth();
   const { failedCount, isOnline, isSyncing, label, pendingCount } = useSyncStatus();
 
@@ -56,7 +60,7 @@ export function SyncStatusBanner({ floating = false }: SyncStatusBannerProps) {
 
   const tone = bannerTone({ failedCount, isOnline, isSyncing, pendingCount });
 
-  return (
+  const content = (
     <View
       style={[
         styles.banner,
@@ -67,6 +71,21 @@ export function SyncStatusBanner({ floating = false }: SyncStatusBannerProps) {
       <View style={[styles.dot, { backgroundColor: tone.color }]} />
       <Text style={[styles.label, { color: tone.color }]}>{label}</Text>
     </View>
+  );
+
+  if (!onPress) {
+    return content;
+  }
+
+  return (
+    <Pressable
+      accessibilityHint="Open sync details"
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [pressed ? styles.pressed : null]}
+    >
+      {content}
+    </Pressable>
   );
 }
 
@@ -95,5 +114,8 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

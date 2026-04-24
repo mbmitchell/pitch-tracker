@@ -4,6 +4,7 @@ import {
   PitcherProfile,
   ThrowingEvent,
 } from '@/types/models';
+import { generateUuid } from '@/utils/ids';
 
 export type LocalSyncState = 'pending' | 'syncing' | 'failed' | 'synced';
 
@@ -100,13 +101,16 @@ function toBreakdownRow(
 }
 
 /**
- * Generates a locally unique id for offline-created records.
+ * Generates a UUID v4 for offline-created records and queue items.
  *
- * @param prefix - entity prefix used for debugging and queue tracing
- * @returns client-generated id suitable for local persistence and later sync
+ * Supabase expects UUID primary keys, so locally-created rows must use the same
+ * shape before they ever reach SQLite or the sync queue.
+ *
+ * @param _prefix - legacy debug prefix parameter retained for call-site compatibility
+ * @returns validated UUID string suitable for local persistence and later sync
  */
-export function generateClientId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+export function generateClientId(_prefix: string) {
+  return generateUuid();
 }
 
 /** Lists cached pitchers for one coach from SQLite. */
@@ -559,4 +563,37 @@ export async function countUnsyncedQueueEntries(coachId: string) {
   );
 
   return rows[0]?.count ?? 0;
+}
+
+/**
+ * Clears all local offline cache and queue tables on this device.
+ *
+ * This does not touch any Supabase data. It is used both for development
+ * resets and for explicit coach sign-out so prior cached data does not remain
+ * on the device longer than necessary.
+ *
+ * @returns promise that resolves when all local offline tables are cleared
+ */
+export async function clearLocalOfflineData() {
+  const db = await getLocalDatabase();
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM local_sync_queue`);
+    await db.runAsync(`DELETE FROM local_event_pitch_breakdown`);
+    await db.runAsync(`DELETE FROM local_throwing_events`);
+    await db.runAsync(`DELETE FROM local_pitcher_profiles`);
+    await db.runAsync(`DELETE FROM sync_queue`);
+    await db.runAsync(`DELETE FROM cached_event_pitch_breakdown`);
+    await db.runAsync(`DELETE FROM cached_throwing_events`);
+    await db.runAsync(`DELETE FROM cached_pitcher_profiles`);
+  });
+}
+
+/**
+ * Backward-compatible alias for development reset flows.
+ *
+ * @returns promise that resolves when all local offline tables are cleared
+ */
+export async function resetLocalOfflineData() {
+  await clearLocalOfflineData();
 }

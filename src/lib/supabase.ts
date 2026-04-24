@@ -1,6 +1,7 @@
 import 'react-native-url-polyfill/auto';
-import 'expo-sqlite/localStorage/install';
 
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { createClient, processLock } from '@supabase/supabase-js';
 
 import { Database } from '@/types/database';
@@ -15,9 +16,9 @@ export const isSupabaseConfigured = Boolean(
 );
 
 type AuthStorage = {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-  removeItem: (key: string) => void;
+  getItem: (key: string) => string | Promise<string | null> | null;
+  setItem: (key: string, value: string) => void | Promise<void>;
+  removeItem: (key: string) => void | Promise<void>;
 };
 
 const memoryStorage = new Map<string, string>();
@@ -45,9 +46,18 @@ function hasStorageShape(value: unknown): value is AuthStorage {
   );
 }
 
-const authStorage = hasStorageShape(globalThis.localStorage)
-  ? globalThis.localStorage
-  : fallbackStorage;
+const secureStoreAuthStorage: AuthStorage = {
+  getItem: (key) => SecureStore.getItemAsync(key),
+  setItem: (key, value) => SecureStore.setItemAsync(key, value),
+  removeItem: (key) => SecureStore.deleteItemAsync(key),
+};
+
+const webStorage =
+  typeof globalThis !== 'undefined' && hasStorageShape(globalThis.localStorage)
+    ? globalThis.localStorage
+    : fallbackStorage;
+
+const authStorage = Platform.OS === 'web' ? webStorage : secureStoreAuthStorage;
 
 if (
   !process.env.EXPO_PUBLIC_SUPABASE_URL ||

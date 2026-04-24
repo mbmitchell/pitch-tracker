@@ -3,6 +3,7 @@ import { createContext, ReactNode, useContext, useEffect, useMemo, useState } fr
 import { AppState, AppStateStatus, Platform } from 'react-native';
 
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { clearLocalOfflineData } from '@/services/localData';
 
 type AuthAction = 'signIn' | 'signUp' | 'signOut' | null;
 
@@ -182,13 +183,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { error } = await supabase.auth.signOut();
 
-    setAuthAction(null);
-
     if (error) {
+      setAuthAction(null);
       setAuthError(error.message);
       return { success: false, error: error.message };
     }
 
+    try {
+      await clearLocalOfflineData();
+    } catch (clearError) {
+      const message =
+        clearError instanceof Error
+          ? `Signed out, but local offline data could not be cleared: ${clearError.message}`
+          : 'Signed out, but local offline data could not be cleared.';
+
+      setAuthAction(null);
+      setAuthError(message);
+      return { success: false, error: message };
+    }
+
+    setAuthAction(null);
     return { success: true };
   }
 

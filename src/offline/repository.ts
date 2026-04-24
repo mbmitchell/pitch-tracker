@@ -7,6 +7,7 @@ import {
   PitcherProfile,
   ThrowingEvent,
 } from '@/types/models';
+import { generateUuid } from '@/utils/ids';
 
 import {
   CachedEventPitchBreakdownRow,
@@ -21,27 +22,13 @@ function nowIsoString() {
   return new Date().toISOString();
 }
 
-function createUuidSegment(length: number) {
-  return Array.from({ length }, () =>
-    Math.floor(Math.random() * 16).toString(16)
-  ).join('');
-}
-
 /**
- * Generates a UUID-like client id for offline-created rows and queue entries.
- *
- * This keeps ids stable before cloud sync without adding another dependency.
+ * Generates a UUID v4 for offline-created rows and queue entries.
  *
  * @returns locally generated UUID string
  */
 export function generateOfflineUuid() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-
-  return `${createUuidSegment(8)}-${createUuidSegment(4)}-4${createUuidSegment(
-    3
-  )}-a${createUuidSegment(3)}-${createUuidSegment(12)}`;
+  return generateUuid();
 }
 
 function toCachedPitcherRow(

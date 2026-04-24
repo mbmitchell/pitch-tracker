@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker, {
-  DateTimePickerEvent,
+  DateTimePickerChangeEvent,
 } from '@react-native-community/datetimepicker';
 
 import {
@@ -15,6 +15,8 @@ import {
   formatIsoDateForDisplay,
   getTodayIsoDateString,
   isoDateStringToDate,
+  isValidDate,
+  normalizeDatePickerValue,
 } from '@/utils/dates';
 import { colors, radius, spacing } from '@/utils/theme';
 
@@ -45,10 +47,12 @@ export function DatePickerField({
 }: DatePickerFieldProps) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
-  const selectedDate = useMemo(
-    () => isoDateStringToDate(value ?? getTodayIsoDateString()),
-    [value]
-  );
+  const selectedDate = useMemo(() => {
+    const parsedValue = isoDateStringToDate(value ?? getTodayIsoDateString());
+    return isValidDate(parsedValue)
+      ? parsedValue
+      : isoDateStringToDate(getTodayIsoDateString());
+  }, [value]);
 
   function openPicker() {
     if (!disabled) {
@@ -60,17 +64,32 @@ export function DatePickerField({
     setIsPickerOpen(false);
   }
 
-  function handleChange(event: DateTimePickerEvent, nextDate?: Date) {
+  function handleValueChange(
+    event: DateTimePickerChangeEvent,
+    nextValue?: Date | string | null
+  ) {
+    const nextDate =
+      normalizeDatePickerValue(nextValue) ?? normalizeDatePickerValue(event);
+
+    if (!nextDate) {
+      return;
+    }
+
     if (Platform.OS === 'android') {
       closePicker();
     }
 
-    if (event.type === 'dismissed' || !nextDate) {
-      return;
-    }
-
     onChange(dateToIsoDateString(nextDate));
   }
+
+  const display = Platform.OS === 'ios' ? ('spinner' as const) : ('default' as const);
+
+  const nativePickerProps = {
+    display,
+    mode: 'date' as const,
+    onValueChange: handleValueChange,
+    value: selectedDate,
+  };
 
   return (
     <View style={styles.wrapper}>
@@ -110,12 +129,7 @@ export function DatePickerField({
 
       {isPickerOpen ? (
         <View style={styles.pickerCard}>
-          <DateTimePicker
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            mode="date"
-            onChange={handleChange}
-            value={selectedDate}
-          />
+          <DateTimePicker {...nativePickerProps} />
           {Platform.OS === 'ios' ? (
             <View style={styles.pickerActions}>
               {clearable && value ? (

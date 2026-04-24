@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -14,6 +15,7 @@ import { spacing } from '@/utils/theme';
 export function AppShellSyncStatus() {
   const { isAuthenticated } = useAuth();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
 
   if (!isAuthenticated) {
     return null;
@@ -29,7 +31,7 @@ export function AppShellSyncStatus() {
         },
       ]}
     >
-      <SyncStatusBanner floating />
+      <SyncStatusBanner floating onPress={() => router.push('/sync')} />
     </View>
   );
 }

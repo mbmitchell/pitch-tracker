@@ -8,6 +8,7 @@ import {
   LocalQueueEntry,
   LocalSyncState,
   listLocalSyncQueueEntries,
+  resetLocalOfflineData,
   updateLocalPitchBreakdownSyncState,
   updateLocalPitcherSyncState,
   updateLocalSyncQueueEntry,
@@ -26,6 +27,10 @@ import {
   ThrowingEvent,
   ThrowingEventInsert,
 } from '@/types/models';
+
+export type SyncQueueDisplayItem = LocalQueueEntry & {
+  entity_type: 'pitcher_profile' | 'throwing_event' | 'event_pitch_breakdown';
+};
 
 type SyncIndicatorState = {
   isOnline: boolean;
@@ -78,6 +83,39 @@ export async function refreshFailedSyncCount(coachId: string) {
 
 function getSupabaseClient() {
   return supabase as any;
+}
+
+/**
+ * Maps queue mutation types to the user-facing entity categories shown in sync details.
+ *
+ * @param mutationType - stored queue mutation type
+ * @returns derived entity type label
+ */
+export function getSyncEntityType(
+  mutationType: LocalQueueEntry['mutation_type']
+): SyncQueueDisplayItem['entity_type'] {
+  switch (mutationType) {
+    case 'create_pitcher':
+    case 'update_pitcher':
+      return 'pitcher_profile';
+    case 'create_throwing_event':
+      return 'throwing_event';
+    default:
+      return 'event_pitch_breakdown';
+  }
+}
+
+/**
+ * Builds a readable sync queue item shape for the details screen.
+ *
+ * @param entry - raw queue entry from local storage
+ * @returns queue item enriched with a derived entity type
+ */
+export function toSyncQueueDisplayItem(entry: LocalQueueEntry): SyncQueueDisplayItem {
+  return {
+    ...entry,
+    entity_type: getSyncEntityType(entry.mutation_type),
+  };
 }
 
 async function syncCreatePitcher(coachId: string, queueEntry: LocalQueueEntry) {
@@ -243,6 +281,74 @@ export async function processPendingSyncQueueForCoach(coachId: string) {
  */
 export async function triggerSyncNowForCoach(coachId: string) {
   return processPendingSyncQueueForCoach(coachId);
+}
+
+/**
+ * Lists pending, syncing, and failed queue items for one coach.
+ *
+ * @param coachId - authenticated coach id
+ * @returns visible queue items for sync details UI
+ */
+export async function listSyncQueueItemsForCoach(coachId: string) {
+  const entries = await listLocalSyncQueueEntries(coachId, ['pending', 'syncing', 'failed']);
+  return entries.map(toSyncQueueDisplayItem);
+}
+
+/**
+ * Retries failed queue entries by resetting them to pending and clearing the latest error.
+ *
+ * @param coachId - authenticated coach id
+ */
+export async function retryFailedSyncItemsForCoach(coachId: string) {
+  const failedEntries = await listLocalSyncQueueEntries(coachId, ['failed']);
+
+  for (const entry of failedEntries) {
+    await updateLocalSyncQueueEntry(entry.id, 'pending', null, 0);
+  }
+
+  notifySyncListeners();
+
+  if (getIsOnline()) {
+    await triggerSyncNowForCoach(coachId);
+  }
+}
+
+/**
+ * Triggers queue processing for all currently queued work.
+ *
+ * Failed items are reset to pending first so a manual retry can replay the full queue.
+ *
+ * @param coachId - authenticated coach id
+ */
+export async function retryAllSyncItemsForCoach(coachId: string) {
+  const queuedEntries = await listLocalSyncQueueEntries(coachId, ['failed', 'pending']);
+
+  for (const entry of queuedEntries) {
+    if (entry.status === 'failed') {
+      await updateLocalSyncQueueEntry(entry.id, 'pending', null, 0);
+    }
+  }
+
+  notifySyncListeners();
+
+  if (getIsOnline()) {
+    await triggerSyncNowForCoach(coachId);
+  }
+}
+
+/**
+ * Clears all local offline cache and queue data for development testing.
+ *
+ * This is intentionally dev-only because it removes cached SQLite data and
+ * pending local mutations, but it does not touch any Supabase/cloud records.
+ */
+export async function resetLocalOfflineDataForDevelopment() {
+  if (!__DEV__) {
+    throw new Error('Local offline data reset is only available in development.');
+  }
+
+  await resetLocalOfflineData();
+  notifySyncListeners();
 }
 
 /**

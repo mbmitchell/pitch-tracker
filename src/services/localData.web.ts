@@ -3,6 +3,7 @@ import {
   PitcherProfile,
   ThrowingEvent,
 } from '@/types/models';
+import { generateUuid } from '@/utils/ids';
 
 export type LocalSyncState = 'pending' | 'syncing' | 'failed' | 'synced';
 
@@ -33,9 +34,9 @@ const breakdownRows = new Map<string, EventPitchBreakdown>();
 const breakdownCoachIds = new Map<string, string>();
 const queue = new Map<string, LocalQueueEntry>();
 
-/** Generates a locally unique id for offline-created records in the web shim. */
-export function generateClientId(prefix: string) {
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+/** Generates a UUID v4 for offline-created records in the web shim. */
+export function generateClientId(_prefix: string) {
+  return generateUuid();
 }
 
 /** Lists cached pitchers for one coach in the web fallback store. */
@@ -223,4 +224,21 @@ export async function countUnsyncedQueueEntries(coachId: string) {
   return Array.from(queue.values()).filter(
     (entry) => entry.coach_id === coachId && entry.status !== 'synced'
   ).length;
+}
+
+/**
+ * Clears all local offline cache and queue state in the web shim.
+ */
+export async function clearLocalOfflineData() {
+  pitchers.clear();
+  pitcherCoachIds.clear();
+  events.clear();
+  eventCoachIds.clear();
+  breakdownRows.clear();
+  breakdownCoachIds.clear();
+  queue.clear();
+}
+
+export async function resetLocalOfflineData() {
+  await clearLocalOfflineData();
 }
