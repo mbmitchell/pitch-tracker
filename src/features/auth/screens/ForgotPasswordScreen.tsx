@@ -9,36 +9,44 @@ import { TextField } from '@/components/TextField';
 import { useAuth } from '@/services/auth';
 import { colors, spacing } from '@/utils/theme';
 
-/** Renders the Phase 1 coach sign-in flow. */
-export function SignInScreen() {
-  const { authError, clearAuthError, isSigningIn, signIn } = useAuth();
+const genericSuccessMessage =
+  'If an account exists for that email, a password reset link has been sent.';
+
+/** Renders the Phase 1 forgot-password request flow for coach accounts. */
+export function ForgotPasswordScreen() {
+  const {
+    authError,
+    clearAuthError,
+    isRequestingPasswordReset,
+    requestPasswordReset,
+  } = useAuth();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   async function handleSubmit() {
     clearAuthError();
     setValidationError(null);
+    setSuccessMessage(null);
 
     if (!email.trim()) {
       setValidationError('Enter the coach account email to continue.');
       return;
     }
 
-    if (!password) {
-      setValidationError('Enter your password to sign in.');
-      return;
-    }
+    const result = await requestPasswordReset(email);
 
-    await signIn({ email, password });
+    if (result.success) {
+      setSuccessMessage(genericSuccessMessage);
+    }
   }
 
   return (
     <Screen
-      title="Welcome back"
-      subtitle="Coach-centered access for managing throwing workload, bullpen plans, and pitcher development."
+      title="Reset password"
+      subtitle="Request a password reset email for your Bullpen Planner coach account."
     >
-      <SectionCard title="Sign in">
+      <SectionCard title="Forgot password">
         <TextField
           autoCapitalize="none"
           autoComplete="email"
@@ -46,65 +54,51 @@ export function SignInScreen() {
           label="Email"
           onChangeText={(value) => {
             setEmail(value);
-            if (validationError || authError) {
+            if (validationError || authError || successMessage) {
               clearAuthError();
               setValidationError(null);
-            }
-          }}
-          placeholder="coach@bullpenplanner.com"
-          textContentType="emailAddress"
-          value={email}
-        />
-        <TextField
-          autoCapitalize="none"
-          autoComplete="password"
-          label="Password"
-          onChangeText={(value) => {
-            setPassword(value);
-            if (validationError || authError) {
-              clearAuthError();
-              setValidationError(null);
+              setSuccessMessage(null);
             }
           }}
           onSubmitEditing={() => {
             void handleSubmit();
           }}
-          placeholder="Enter password"
-          secureTextEntry
-          textContentType="password"
-          value={password}
+          placeholder="coach@bullpenplanner.com"
+          textContentType="emailAddress"
+          value={email}
         />
-        <View style={styles.inlineLinkRow}>
-          <Link href="/forgot-password" style={styles.inlineLink}>
-            Forgot password?
-          </Link>
-        </View>
         {validationError || authError ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{validationError ?? authError}</Text>
           </View>
         ) : null}
+        {successMessage ? (
+          <View style={styles.successBanner}>
+            <Text style={styles.successText}>{successMessage}</Text>
+          </View>
+        ) : null}
         <PrimaryButton
-          disabled={isSigningIn}
-          label={isSigningIn ? 'Signing in' : 'Sign in'}
-          loading={isSigningIn}
+          disabled={isRequestingPasswordReset}
+          label={isRequestingPasswordReset ? 'Sending reset link' : 'Send reset link'}
+          loading={isRequestingPasswordReset}
           onPress={() => {
             void handleSubmit();
           }}
         />
       </SectionCard>
 
-      <SectionCard title="Phase 1">
+      <SectionCard title="Phase 1 note">
         <Text style={styles.note}>
-          Bullpen Planner v1 is coach-centered and uses Supabase email/password auth.
-          Pitcher login and role management can layer on later without changing this flow.
+          The reset email request is live. To complete password recovery fully inside
+          the app, Supabase recovery redirect URLs and a dedicated password update
+          callback screen still need to be configured.
         </Text>
       </SectionCard>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Need an account?</Text>
-        <Link href="/sign-up" style={styles.link}>
-          Create one
+        <Text style={styles.footerText}>Back to sign in?</Text>
+        <Link href="/sign-in" style={styles.link}>
+          Return
         </Link>
       </View>
     </Screen>
@@ -127,17 +121,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  successBanner: {
+    backgroundColor: colors.successSoft,
+    borderRadius: 14,
+    padding: spacing.md,
+  },
+  successText: {
+    color: colors.success,
+    fontSize: 14,
+    lineHeight: 20,
+  },
   footer: {
     flexDirection: 'row',
     gap: spacing.xs,
-  },
-  inlineLinkRow: {
-    alignItems: 'flex-end',
-  },
-  inlineLink: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   footerText: {
     color: colors.muted,

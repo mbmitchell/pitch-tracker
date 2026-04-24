@@ -5,7 +5,7 @@ import { AppState, AppStateStatus, Platform } from 'react-native';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { clearLocalOfflineData } from '@/services/localData';
 
-type AuthAction = 'signIn' | 'signUp' | 'signOut' | null;
+type AuthAction = 'signIn' | 'signUp' | 'signOut' | 'resetPassword' | null;
 
 type Credentials = {
   email: string;
@@ -28,6 +28,11 @@ type SignOutResult = {
   error?: string;
 };
 
+type PasswordResetResult = {
+  success: boolean;
+  error?: string;
+};
+
 type AuthContextValue = {
   session: Session | null;
   user: User | null;
@@ -37,9 +42,11 @@ type AuthContextValue = {
   isSigningIn: boolean;
   isSigningUp: boolean;
   isSigningOut: boolean;
+  isRequestingPasswordReset: boolean;
   signIn: (credentials: Credentials) => Promise<SignInResult>;
   signUp: (credentials: Credentials) => Promise<SignUpResult>;
   signOut: () => Promise<SignOutResult>;
+  requestPasswordReset: (email: string) => Promise<PasswordResetResult>;
   clearAuthError: () => void;
 };
 
@@ -125,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: missingConfigMessage };
     }
 
-    setAuthAction('signIn');
+    setAuthAction('resetPassword');
 
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -206,6 +213,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
+  async function requestPasswordReset(email: string): Promise<PasswordResetResult> {
+    setAuthError(null);
+
+    if (!isSupabaseConfigured) {
+      setAuthError(missingConfigMessage);
+      return { success: false, error: missingConfigMessage };
+    }
+
+    setAuthAction('signIn');
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+
+    setAuthAction(null);
+
+    if (error) {
+      setAuthError(error.message);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  }
+
   const value = useMemo<AuthContextValue>(
     () => ({
       session,
@@ -216,9 +245,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSigningIn: authAction === 'signIn',
       isSigningUp: authAction === 'signUp',
       isSigningOut: authAction === 'signOut',
+      isRequestingPasswordReset: authAction === 'resetPassword',
       signIn,
       signUp,
       signOut,
+      requestPasswordReset,
       clearAuthError: () => setAuthError(null),
     }),
     [authAction, authError, isBootstrapping, session, user]
