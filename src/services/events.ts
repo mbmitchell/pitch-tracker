@@ -22,6 +22,7 @@ import {
   listLocalPitchBreakdownForEventIds,
   listLocalThrowingEventsForCoach,
   listLocalThrowingEventsForPitcher,
+  replaceLocalPitchBreakdownForEvent,
   upsertLocalPitchBreakdownRows,
   upsertLocalThrowingEvent,
   upsertLocalThrowingEvents,
@@ -146,7 +147,10 @@ async function hydrateLocalPitcherEvents(
   limit: number
 ) {
   const events = await listLocalThrowingEventsForPitcher(coachId, pitcherId, limit);
-  const breakdownRows = await listLocalPitchBreakdownForEventIds(events.map((event) => event.id));
+  const breakdownRows = await listLocalPitchBreakdownForEventIds(
+    coachId,
+    events.map((event) => event.id)
+  );
   const breakdownByEventId = new Map<string, EventPitchBreakdown[]>();
 
   breakdownRows.forEach((row) => {
@@ -159,6 +163,88 @@ async function hydrateLocalPitcherEvents(
     ...event,
     event_pitch_breakdown: breakdownByEventId.get(event.id) ?? [],
   }));
+}
+
+/**
+ * Reads cached throwing events across a coach account without using Supabase.
+ *
+ * @param coachId - authenticated coach id
+ * @param limit - max number of events to return
+ * @returns locally cached throwing events
+ */
+export async function getCachedThrowingEventsForCoach(coachId: string, limit = 200) {
+  return listLocalThrowingEventsForCoach(coachId, limit);
+}
+
+/**
+ * Reads cached pitcher event history with hydrated breakdown rows.
+ *
+ * @param coachId - authenticated coach id
+ * @param pitcherId - target pitcher id
+ * @param limit - max number of events to return
+ * @returns locally cached event records for one pitcher
+ */
+export async function getCachedThrowingEventsForPitcher(
+  coachId: string,
+  pitcherId: string,
+  limit = 10
+) {
+  return hydrateLocalPitcherEvents(coachId, pitcherId, limit);
+}
+
+/**
+ * Writes throwing events fetched from Supabase into the local event cache.
+ *
+ * @param coachId - authenticated coach id
+ * @param events - throwing events fetched from Supabase
+ * @returns cached event collection after the upsert
+ */
+export async function cacheThrowingEvents(coachId: string, events: ThrowingEvent[]) {
+  await upsertLocalThrowingEvents(coachId, events, 'synced');
+  return listLocalThrowingEventsForCoach(coachId);
+}
+
+async function cacheThrowingEventHistory(
+  coachId: string,
+  pitcherId: string,
+  events: ThrowingEventRecord[],
+  limit: number
+) {
+  if (!events.length) {
+    return [] as ThrowingEventRecord[];
+  }
+
+  await upsertLocalThrowingEvents(
+    coachId,
+    events.map((event) => ({
+      id: event.id,
+      pitcher_id: event.pitcher_id,
+      date: event.date,
+      event_type: event.event_type,
+      total_pitches: event.total_pitches,
+      innings_thrown: event.innings_thrown,
+      intensity: event.intensity,
+      arm_feel: event.arm_feel,
+      bullpen_focus: event.bullpen_focus,
+      notes: event.notes,
+      entered_by_user_id: event.entered_by_user_id,
+      source_type: event.source_type,
+      created_at: event.created_at,
+      updated_at: event.updated_at,
+    })),
+    'synced'
+  );
+
+  for (const event of events) {
+    await replaceLocalPitchBreakdownForEvent(
+      coachId,
+      event.id,
+      event.event_pitch_breakdown,
+      'synced'
+    );
+  }
+
+  return getCachedThrowingEventsForPitcher(coachId, pitcherId, limit);
 }
 
 async function triggerSyncIfOnline(coachId: string) {
@@ -290,7 +376,7 @@ export async function listThrowingEventsForPitcher(
     throw new Error('Pitcher profile not found for this coach.');
   }
 
-  const localEvents = await hydrateLocalPitcherEvents(coachId, pitcherId, limit);
+  const localEvents = await getCachedThrowingEventsForPitcher(coachId, pitcherId, limit);
 
   if (!canUseRemote()) {
     return {
@@ -301,34 +387,9 @@ export async function listThrowingEventsForPitcher(
 
   try {
     const remoteEvents = await fetchThrowingEventsForPitcherFromRemote(pitcherId, limit);
-    await upsertLocalThrowingEvents(
-      coachId,
-      remoteEvents.map((event) => ({
-        id: event.id,
-        pitcher_id: event.pitcher_id,
-        date: event.date,
-        event_type: event.event_type,
-        total_pitches: event.total_pitches,
-        innings_thrown: event.innings_thrown,
-        intensity: event.intensity,
-        arm_feel: event.arm_feel,
-        bullpen_focus: event.bullpen_focus,
-        notes: event.notes,
-        entered_by_user_id: event.entered_by_user_id,
-        source_type: event.source_type,
-        created_at: event.created_at,
-        updated_at: event.updated_at,
-      })),
-      'synced'
-    );
-
-    for (const event of remoteEvents) {
-      await upsertLocalPitchBreakdownRows(coachId, event.event_pitch_breakdown, 'synced');
-    }
-
     return {
       pitcher,
-      events: await hydrateLocalPitcherEvents(coachId, pitcherId, limit),
+      events: await cacheThrowingEventHistory(coachId, pitcherId, remoteEvents, limit),
     };
   } catch (error) {
     return {
@@ -349,7 +410,7 @@ export async function listThrowingEventsForPitcher(
  * @returns throwing events in descending recency order
  */
 export async function listThrowingEventsForCoach(coachId: string, limit = 200) {
-  const localEvents = await listLocalThrowingEventsForCoach(coachId, limit);
+  const localEvents = await getCachedThrowingEventsForCoach(coachId, limit);
 
   if (!canUseRemote()) {
     return localEvents;
@@ -357,8 +418,8 @@ export async function listThrowingEventsForCoach(coachId: string, limit = 200) {
 
   try {
     const remoteEvents = await fetchThrowingEventsForCoachFromRemote(coachId, limit);
-    await upsertLocalThrowingEvents(coachId, remoteEvents, 'synced');
-    return listLocalThrowingEventsForCoach(coachId, limit);
+    await cacheThrowingEvents(coachId, remoteEvents);
+    return getCachedThrowingEventsForCoach(coachId, limit);
   } catch (error) {
     return localEvents;
   }

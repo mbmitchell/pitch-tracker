@@ -160,8 +160,13 @@ export async function upsertLocalPitchBreakdownRows(
 }
 
 /** Lists cached pitch-breakdown rows for event ids in the web fallback store. */
-export async function listLocalPitchBreakdownForEventIds(eventIds: string[]) {
-  return Array.from(breakdownRows.values()).filter((row) => eventIds.includes(row.event_id));
+export async function listLocalPitchBreakdownForEventIds(
+  coachId: string,
+  eventIds: string[]
+) {
+  return Array.from(breakdownRows.values()).filter(
+    (row) => breakdownCoachIds.get(row.id) === coachId && eventIds.includes(row.event_id)
+  );
 }
 
 /** No-op pitch-breakdown sync-state update for the web fallback store. */

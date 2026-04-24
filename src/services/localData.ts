@@ -352,7 +352,11 @@ export async function replaceLocalPitchBreakdownForEvent(
   const db = await getLocalDatabase();
 
   await db.withTransactionAsync(async () => {
-    await db.runAsync(`DELETE FROM local_event_pitch_breakdown WHERE event_id = ?`, eventId);
+    await db.runAsync(
+      `DELETE FROM local_event_pitch_breakdown WHERE coach_id = ? AND event_id = ?`,
+      coachId,
+      eventId
+    );
 
     for (const row of rows) {
       const nextRow = toBreakdownRow(coachId, row, syncState);
@@ -416,7 +420,10 @@ export async function upsertLocalPitchBreakdownRows(
 }
 
 /** Lists cached pitch-breakdown rows for a set of event ids. */
-export async function listLocalPitchBreakdownForEventIds(eventIds: string[]) {
+export async function listLocalPitchBreakdownForEventIds(
+  coachId: string,
+  eventIds: string[]
+) {
   if (!eventIds.length) {
     return [] as EventPitchBreakdown[];
   }
@@ -427,9 +434,10 @@ export async function listLocalPitchBreakdownForEventIds(eventIds: string[]) {
     `
       SELECT id, event_id, pitch_type, pitch_count
       FROM local_event_pitch_breakdown
-      WHERE event_id IN (${placeholders})
+      WHERE coach_id = ? AND event_id IN (${placeholders})
       ORDER BY pitch_type ASC
     `,
+    coachId,
     ...eventIds
   );
 }

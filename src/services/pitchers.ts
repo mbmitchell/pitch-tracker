@@ -90,6 +90,39 @@ async function fetchPitcherFromRemote(coachId: string, pitcherId: string) {
   return (data ?? null) as PitcherProfile | null;
 }
 
+/**
+ * Writes remote pitcher data into the local cache.
+ *
+ * @param coachId - authenticated coach id
+ * @param pitchers - pitcher rows fetched from Supabase
+ * @returns cached pitcher collection after the upsert
+ */
+export async function cachePitchers(coachId: string, pitchers: PitcherProfile[]) {
+  await upsertLocalPitchers(coachId, pitchers, 'synced');
+  return listLocalPitchersForCoach(coachId);
+}
+
+/**
+ * Reads cached pitcher profiles without touching Supabase.
+ *
+ * @param coachId - authenticated coach id
+ * @returns locally cached pitcher profiles
+ */
+export async function getCachedPitchers(coachId: string) {
+  return listLocalPitchersForCoach(coachId);
+}
+
+/**
+ * Reads one cached pitcher profile without touching Supabase.
+ *
+ * @param coachId - authenticated coach id
+ * @param pitcherId - target pitcher id
+ * @returns locally cached pitcher profile when available
+ */
+export async function getCachedPitcherByIdForCoach(coachId: string, pitcherId: string) {
+  return getLocalPitcherByIdForCoach(coachId, pitcherId);
+}
+
 async function triggerSyncIfOnline(coachId: string) {
   await refreshPendingSyncCount(coachId);
 }
@@ -111,7 +144,7 @@ export function formatPitcherName(pitcher: Pick<PitcherProfile, 'first_name' | '
  * @returns coach-owned pitchers ordered for roster display
  */
 export async function listPitchersForCoach(coachId: string) {
-  const localPitchers = await listLocalPitchersForCoach(coachId);
+  const localPitchers = await getCachedPitchers(coachId);
 
   if (!canUseRemote()) {
     return localPitchers;
@@ -119,8 +152,7 @@ export async function listPitchersForCoach(coachId: string) {
 
   try {
     const remotePitchers = await fetchPitchersFromRemote(coachId);
-    await upsertLocalPitchers(coachId, remotePitchers, 'synced');
-    return listLocalPitchersForCoach(coachId);
+    return cachePitchers(coachId, remotePitchers);
   } catch (error) {
     if (localPitchers.length) {
       return localPitchers;
@@ -138,7 +170,7 @@ export async function listPitchersForCoach(coachId: string) {
  * @returns pitcher profile when found, otherwise null
  */
 export async function getPitcherByIdForCoach(pitcherId: string, coachId: string) {
-  const localPitcher = await getLocalPitcherByIdForCoach(coachId, pitcherId);
+  const localPitcher = await getCachedPitcherByIdForCoach(coachId, pitcherId);
 
   if (!canUseRemote()) {
     return localPitcher;
