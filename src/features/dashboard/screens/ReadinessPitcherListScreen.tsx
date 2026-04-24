@@ -8,15 +8,17 @@ import { Screen } from '@/components/Screen';
 import { SectionCard } from '@/components/SectionCard';
 import { PitcherStaffOverviewRow } from '@/features/dashboard/components/PitcherStaffOverviewRow';
 import {
-  buildPitcherStaffOverview,
   filterPitcherStaffOverviewByReadiness,
   PitcherStaffOverview,
   READINESS_FILTER_CONFIG,
   ReadinessFilterKey,
 } from '@/features/dashboard/utils/staffOverview';
 import { useAuth } from '@/services/auth';
-import { listThrowingEventsForCoach } from '@/services/events';
-import { listPitchersForCoach } from '@/services/pitchers';
+import {
+  getStaffOverviewLoadErrorMessage,
+  loadStaffOverviewForCoach,
+} from '@/features/dashboard/services/staffOverview';
+import { useSyncStatus } from '@/services/sync';
 import { colors, spacing } from '@/utils/theme';
 
 type ReadinessPitcherListScreenProps = {
@@ -30,6 +32,7 @@ export function ReadinessPitcherListScreen({
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user } = useAuth();
+  const { isOnline } = useSyncStatus();
   const [overview, setOverview] = useState<PitcherStaffOverview[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,23 +48,17 @@ export function ReadinessPitcherListScreen({
       setError(null);
 
       try {
-        const [pitchers, events] = await Promise.all([
-          listPitchersForCoach(user.id),
-          listThrowingEventsForCoach(user.id),
-        ]);
-
-        setOverview(buildPitcherStaffOverview(pitchers, events));
+        setOverview(await loadStaffOverviewForCoach(user.id));
       } catch (nextError) {
-        setError(
-          nextError instanceof Error ? nextError.message : 'Unable to load filtered pitchers.'
-        );
+        setOverview([]);
+        setError(getStaffOverviewLoadErrorMessage(nextError, isOnline));
       } finally {
         setIsLoading(false);
       }
     }
 
     void loadOverview();
-  }, [isFocused, refreshToken, user?.id]);
+  }, [isFocused, isOnline, refreshToken, user?.id]);
 
   const config = READINESS_FILTER_CONFIG[filter];
   const filteredOverview = filterPitcherStaffOverviewByReadiness(overview, filter);

@@ -58,6 +58,15 @@ export type ThrowingEventRecord = ThrowingEvent & {
 
 const supabaseClient = supabase as any;
 
+function reportLocalCacheWriteError(context: string, error: unknown) {
+  if (__DEV__) {
+    console.warn(
+      `[local-cache] ${context} failed`,
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 function canUseRemote() {
   return isSupabaseConfigured && getIsOnline();
 }
@@ -444,9 +453,19 @@ export async function listThrowingEventsForPitcher(
 
   try {
     const remoteEvents = await fetchThrowingEventsForPitcherFromRemote(pitcherId, limit);
+
+    let cachedEvents: ThrowingEventRecord[];
+
+    try {
+      cachedEvents = await cacheThrowingEventHistory(coachId, pitcherId, remoteEvents, limit);
+    } catch (cacheError) {
+      reportLocalCacheWriteError('cacheThrowingEventHistory', cacheError);
+      cachedEvents = remoteEvents;
+    }
+
     return {
       pitcher,
-      events: await cacheThrowingEventHistory(coachId, pitcherId, remoteEvents, limit),
+      events: cachedEvents,
     };
   } catch (error) {
     return {
@@ -475,8 +494,14 @@ export async function listThrowingEventsForCoach(coachId: string, limit = 200) {
 
   try {
     const remoteEvents = await fetchThrowingEventsForCoachFromRemote(coachId, limit);
-    await cacheThrowingEvents(coachId, remoteEvents);
-    return getCachedThrowingEventsForCoach(coachId, limit);
+
+    try {
+      await cacheThrowingEvents(coachId, remoteEvents);
+      return await getCachedThrowingEventsForCoach(coachId, limit);
+    } catch (cacheError) {
+      reportLocalCacheWriteError('cacheThrowingEvents', cacheError);
+      return remoteEvents;
+    }
   } catch (error) {
     return localEvents;
   }

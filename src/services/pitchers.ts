@@ -36,6 +36,15 @@ export type PitcherProfileInput = {
 
 const supabaseClient = supabase as any;
 
+function reportLocalCacheWriteError(context: string, error: unknown) {
+  if (__DEV__) {
+    console.warn(
+      `[local-cache] ${context} failed`,
+      error instanceof Error ? error.message : error
+    );
+  }
+}
+
 function canUseRemote() {
   return isSupabaseConfigured && getIsOnline();
 }
@@ -166,7 +175,12 @@ export async function listPitchersForCoach(coachId: string) {
 
   try {
     const remotePitchers = await fetchPitchersFromRemote(coachId);
-    return cachePitchers(coachId, remotePitchers);
+    try {
+      return await cachePitchers(coachId, remotePitchers);
+    } catch (cacheError) {
+      reportLocalCacheWriteError('cachePitchers', cacheError);
+      return remotePitchers;
+    }
   } catch (error) {
     if (localPitchers.length) {
       return localPitchers;
@@ -194,7 +208,11 @@ export async function getPitcherByIdForCoach(pitcherId: string, coachId: string)
     const remotePitcher = await fetchPitcherFromRemote(coachId, pitcherId);
 
     if (remotePitcher) {
-      await upsertLocalPitcher(coachId, remotePitcher, 'synced');
+      try {
+        await upsertLocalPitcher(coachId, remotePitcher, 'synced');
+      } catch (cacheError) {
+        reportLocalCacheWriteError('upsertLocalPitcher', cacheError);
+      }
     }
 
     return remotePitcher ?? localPitcher;

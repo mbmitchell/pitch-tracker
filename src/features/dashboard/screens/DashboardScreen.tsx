@@ -8,14 +8,16 @@ import { Screen } from '@/components/Screen';
 import { SectionCard } from '@/components/SectionCard';
 import { PitcherStaffOverviewRow } from '@/features/dashboard/components/PitcherStaffOverviewRow';
 import {
-  buildPitcherStaffOverview,
   PitcherStaffOverview,
   READINESS_FILTER_CONFIG,
   ReadinessFilterKey,
 } from '@/features/dashboard/utils/staffOverview';
 import { useAuth } from '@/services/auth';
-import { listThrowingEventsForCoach } from '@/services/events';
-import { listPitchersForCoach } from '@/services/pitchers';
+import {
+  getStaffOverviewLoadErrorMessage,
+  loadStaffOverviewForCoach,
+} from '@/features/dashboard/services/staffOverview';
+import { useSyncStatus } from '@/services/sync';
 import { colors, spacing } from '@/utils/theme';
 
 type TodayAtAGlanceCard = {
@@ -30,6 +32,7 @@ export function DashboardScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const { user } = useAuth();
+  const { isOnline } = useSyncStatus();
   const [overview, setOverview] = useState<PitcherStaffOverview[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,23 +48,17 @@ export function DashboardScreen() {
       setError(null);
 
       try {
-        const [pitchers, events] = await Promise.all([
-          listPitchersForCoach(user.id),
-          listThrowingEventsForCoach(user.id),
-        ]);
-
-        setOverview(buildPitcherStaffOverview(pitchers, events));
+        setOverview(await loadStaffOverviewForCoach(user.id));
       } catch (nextError) {
-        setError(
-          nextError instanceof Error ? nextError.message : 'Unable to load staff overview.'
-        );
+        setOverview([]);
+        setError(getStaffOverviewLoadErrorMessage(nextError, isOnline));
       } finally {
         setIsLoading(false);
       }
     }
 
     void loadDashboard();
-  }, [isFocused, refreshToken, user?.id]);
+  }, [isFocused, isOnline, refreshToken, user?.id]);
 
   const readyCount = overview.filter((item) => item.readiness === 'ready for bullpen').length;
   const moderateCount = overview.filter((item) => item.readiness === 'moderate').length;

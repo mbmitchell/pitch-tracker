@@ -43,6 +43,58 @@ type LocalBreakdownRow = EventPitchBreakdown & {
   sync_state: LocalSyncState;
 };
 
+let localWriteChain = Promise.resolve();
+
+function isRecoverableLocalReadError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('no such table') ||
+    message.includes('cannot rollback') ||
+    message.includes('transaction is active') ||
+    message.includes('database schema')
+  );
+}
+
+async function withLocalReadFallback<T>(
+  operationName: string,
+  fallbackValue: T,
+  operation: () => Promise<T>
+) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isRecoverableLocalReadError(error)) {
+      return fallbackValue;
+    }
+
+    throw new Error(`Local offline read failed in ${operationName}.`, { cause: error });
+  }
+}
+
+async function withSerializedLocalWrite<T>(
+  operationName: string,
+  operation: () => Promise<T>
+) {
+  const run = localWriteChain.then(async () => {
+    try {
+      return await operation();
+    } catch (error) {
+      throw new Error(`Local offline write failed in ${operationName}.`, { cause: error });
+    }
+  });
+
+  localWriteChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+
+  return run;
+}
+
 function toPitcherRow(
   coachId: string,
   pitcher: PitcherProfile,
@@ -115,35 +167,43 @@ export function generateClientId(_prefix: string) {
 
 /** Lists cached pitchers for one coach from SQLite. */
 export async function listLocalPitchersForCoach(coachId: string) {
-  const db = await getLocalDatabase();
-  const rows = await db.getAllAsync<LocalPitcherRow>(
-    `
-      SELECT *
-      FROM local_pitcher_profiles
-      WHERE coach_id = ?
-      ORDER BY last_name ASC, first_name ASC
-    `,
-    coachId
-  );
+  return withLocalReadFallback('listLocalPitchersForCoach', [] as PitcherProfile[], async () => {
+    const db = await getLocalDatabase();
+    const rows = await db.getAllAsync<LocalPitcherRow>(
+      `
+        SELECT *
+        FROM local_pitcher_profiles
+        WHERE coach_id = ?
+        ORDER BY last_name ASC, first_name ASC
+      `,
+      coachId
+    );
 
-  return rows.map(fromPitcherRow);
+    return rows.map(fromPitcherRow);
+  });
 }
 
 /** Loads one cached pitcher by coach and pitcher id. */
 export async function getLocalPitcherByIdForCoach(coachId: string, pitcherId: string) {
-  const db = await getLocalDatabase();
-  const rows = await db.getAllAsync<LocalPitcherRow>(
-    `
-      SELECT *
-      FROM local_pitcher_profiles
-      WHERE coach_id = ? AND id = ?
-      LIMIT 1
-    `,
-    coachId,
-    pitcherId
-  );
+  return withLocalReadFallback(
+    'getLocalPitcherByIdForCoach',
+    null,
+    async () => {
+      const db = await getLocalDatabase();
+      const rows = await db.getAllAsync<LocalPitcherRow>(
+        `
+          SELECT *
+          FROM local_pitcher_profiles
+          WHERE coach_id = ? AND id = ?
+          LIMIT 1
+        `,
+        coachId,
+        pitcherId
+      );
 
-  return rows[0] ? fromPitcherRow(rows[0]) : null;
+      return rows[0] ? fromPitcherRow(rows[0]) : null;
+    }
+  );
 }
 
 /** Upserts pitcher profiles into the local cache with the given sync state. */
@@ -152,56 +212,58 @@ export async function upsertLocalPitchers(
   pitchers: PitcherProfile[],
   syncState: LocalSyncState = 'synced'
 ) {
-  const db = await getLocalDatabase();
+  await withSerializedLocalWrite('upsertLocalPitchers', async () => {
+    const db = await getLocalDatabase();
 
-  await db.withTransactionAsync(async () => {
-    for (const pitcher of pitchers) {
-      const row = toPitcherRow(coachId, pitcher, syncState);
-      await db.runAsync(
-        `
-          INSERT INTO local_pitcher_profiles (
-            id, coach_id, created_by, first_name, last_name, age, grade, level_team,
-            target_game_ready_date, handedness, pitch_arsenal_json, development_phase,
-            primary_goals, notes, created_at, updated_at, sync_state
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            coach_id = excluded.coach_id,
-            created_by = excluded.created_by,
-            first_name = excluded.first_name,
-            last_name = excluded.last_name,
-            age = excluded.age,
-            grade = excluded.grade,
-            level_team = excluded.level_team,
-            target_game_ready_date = excluded.target_game_ready_date,
-            handedness = excluded.handedness,
-            pitch_arsenal_json = excluded.pitch_arsenal_json,
-            development_phase = excluded.development_phase,
-            primary_goals = excluded.primary_goals,
-            notes = excluded.notes,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at,
-            sync_state = excluded.sync_state
-        `,
-        row.id,
-        row.coach_id,
-        row.created_by,
-        row.first_name,
-        row.last_name,
-        row.age,
-        row.grade,
-        row.level_team,
-        row.target_game_ready_date,
-        row.handedness,
-        row.pitch_arsenal_json,
-        row.development_phase,
-        row.primary_goals,
-        row.notes,
-        row.created_at,
-        row.updated_at,
-        row.sync_state
-      );
-    }
+    await db.withTransactionAsync(async () => {
+      for (const pitcher of pitchers) {
+        const row = toPitcherRow(coachId, pitcher, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_pitcher_profiles (
+              id, coach_id, created_by, first_name, last_name, age, grade, level_team,
+              target_game_ready_date, handedness, pitch_arsenal_json, development_phase,
+              primary_goals, notes, created_at, updated_at, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              created_by = excluded.created_by,
+              first_name = excluded.first_name,
+              last_name = excluded.last_name,
+              age = excluded.age,
+              grade = excluded.grade,
+              level_team = excluded.level_team,
+              target_game_ready_date = excluded.target_game_ready_date,
+              handedness = excluded.handedness,
+              pitch_arsenal_json = excluded.pitch_arsenal_json,
+              development_phase = excluded.development_phase,
+              primary_goals = excluded.primary_goals,
+              notes = excluded.notes,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at,
+              sync_state = excluded.sync_state
+          `,
+          row.id,
+          row.coach_id,
+          row.created_by,
+          row.first_name,
+          row.last_name,
+          row.age,
+          row.grade,
+          row.level_team,
+          row.target_game_ready_date,
+          row.handedness,
+          row.pitch_arsenal_json,
+          row.development_phase,
+          row.primary_goals,
+          row.notes,
+          row.created_at,
+          row.updated_at,
+          row.sync_state
+        );
+      }
+    });
   });
 }
 
@@ -216,28 +278,36 @@ export async function upsertLocalPitcher(
 
 /** Updates the sync marker for one cached pitcher record. */
 export async function updateLocalPitcherSyncState(pitcherId: string, syncState: LocalSyncState) {
-  const db = await getLocalDatabase();
-  await db.runAsync(
-    `UPDATE local_pitcher_profiles SET sync_state = ? WHERE id = ?`,
-    syncState,
-    pitcherId
-  );
+  await withSerializedLocalWrite('updateLocalPitcherSyncState', async () => {
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `UPDATE local_pitcher_profiles SET sync_state = ? WHERE id = ?`,
+      syncState,
+      pitcherId
+    );
+  });
 }
 
 /** Lists cached throwing events across a coach's staff. */
 export async function listLocalThrowingEventsForCoach(coachId: string, limit = 200) {
-  const db = await getLocalDatabase();
-  return db.getAllAsync<ThrowingEvent>(
-    `
-      SELECT id, pitcher_id, date, event_type, total_pitches, innings_thrown, intensity,
-             arm_feel, bullpen_focus, notes, entered_by_user_id, source_type, created_at, updated_at
-      FROM local_throwing_events
-      WHERE coach_id = ?
-      ORDER BY date DESC, created_at DESC
-      LIMIT ?
-    `,
-    coachId,
-    limit
+  return withLocalReadFallback(
+    'listLocalThrowingEventsForCoach',
+    [] as ThrowingEvent[],
+    async () => {
+      const db = await getLocalDatabase();
+      return db.getAllAsync<ThrowingEvent>(
+        `
+          SELECT id, pitcher_id, date, event_type, total_pitches, innings_thrown, intensity,
+                 arm_feel, bullpen_focus, notes, entered_by_user_id, source_type, created_at, updated_at
+          FROM local_throwing_events
+          WHERE coach_id = ?
+          ORDER BY date DESC, created_at DESC
+          LIMIT ?
+        `,
+        coachId,
+        limit
+      );
+    }
   );
 }
 
@@ -247,19 +317,25 @@ export async function listLocalThrowingEventsForPitcher(
   pitcherId: string,
   limit = 10
 ) {
-  const db = await getLocalDatabase();
-  return db.getAllAsync<ThrowingEvent>(
-    `
-      SELECT id, pitcher_id, date, event_type, total_pitches, innings_thrown, intensity,
-             arm_feel, bullpen_focus, notes, entered_by_user_id, source_type, created_at, updated_at
-      FROM local_throwing_events
-      WHERE coach_id = ? AND pitcher_id = ?
-      ORDER BY date DESC, created_at DESC
-      LIMIT ?
-    `,
-    coachId,
-    pitcherId,
-    limit
+  return withLocalReadFallback(
+    'listLocalThrowingEventsForPitcher',
+    [] as ThrowingEvent[],
+    async () => {
+      const db = await getLocalDatabase();
+      return db.getAllAsync<ThrowingEvent>(
+        `
+          SELECT id, pitcher_id, date, event_type, total_pitches, innings_thrown, intensity,
+                 arm_feel, bullpen_focus, notes, entered_by_user_id, source_type, created_at, updated_at
+          FROM local_throwing_events
+          WHERE coach_id = ? AND pitcher_id = ?
+          ORDER BY date DESC, created_at DESC
+          LIMIT ?
+        `,
+        coachId,
+        pitcherId,
+        limit
+      );
+    }
   );
 }
 
@@ -269,54 +345,56 @@ export async function upsertLocalThrowingEvents(
   events: ThrowingEvent[],
   syncState: LocalSyncState = 'synced'
 ) {
-  const db = await getLocalDatabase();
+  await withSerializedLocalWrite('upsertLocalThrowingEvents', async () => {
+    const db = await getLocalDatabase();
 
-  await db.withTransactionAsync(async () => {
-    for (const event of events) {
-      const row = toEventRow(coachId, event, syncState);
-      await db.runAsync(
-        `
-          INSERT INTO local_throwing_events (
-            id, coach_id, pitcher_id, date, event_type, total_pitches, innings_thrown,
-            intensity, arm_feel, bullpen_focus, notes, entered_by_user_id, source_type,
-            created_at, updated_at, sync_state
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            coach_id = excluded.coach_id,
-            pitcher_id = excluded.pitcher_id,
-            date = excluded.date,
-            event_type = excluded.event_type,
-            total_pitches = excluded.total_pitches,
-            innings_thrown = excluded.innings_thrown,
-            intensity = excluded.intensity,
-            arm_feel = excluded.arm_feel,
-            bullpen_focus = excluded.bullpen_focus,
-            notes = excluded.notes,
-            entered_by_user_id = excluded.entered_by_user_id,
-            source_type = excluded.source_type,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at,
-            sync_state = excluded.sync_state
-        `,
-        row.id,
-        row.coach_id,
-        row.pitcher_id,
-        row.date,
-        row.event_type,
-        row.total_pitches,
-        row.innings_thrown,
-        row.intensity,
-        row.arm_feel,
-        row.bullpen_focus,
-        row.notes,
-        row.entered_by_user_id,
-        row.source_type,
-        row.created_at,
-        row.updated_at,
-        row.sync_state
-      );
-    }
+    await db.withTransactionAsync(async () => {
+      for (const event of events) {
+        const row = toEventRow(coachId, event, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_throwing_events (
+              id, coach_id, pitcher_id, date, event_type, total_pitches, innings_thrown,
+              intensity, arm_feel, bullpen_focus, notes, entered_by_user_id, source_type,
+              created_at, updated_at, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              pitcher_id = excluded.pitcher_id,
+              date = excluded.date,
+              event_type = excluded.event_type,
+              total_pitches = excluded.total_pitches,
+              innings_thrown = excluded.innings_thrown,
+              intensity = excluded.intensity,
+              arm_feel = excluded.arm_feel,
+              bullpen_focus = excluded.bullpen_focus,
+              notes = excluded.notes,
+              entered_by_user_id = excluded.entered_by_user_id,
+              source_type = excluded.source_type,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at,
+              sync_state = excluded.sync_state
+          `,
+          row.id,
+          row.coach_id,
+          row.pitcher_id,
+          row.date,
+          row.event_type,
+          row.total_pitches,
+          row.innings_thrown,
+          row.intensity,
+          row.arm_feel,
+          row.bullpen_focus,
+          row.notes,
+          row.entered_by_user_id,
+          row.source_type,
+          row.created_at,
+          row.updated_at,
+          row.sync_state
+        );
+      }
+    });
   });
 }
 
@@ -334,12 +412,14 @@ export async function updateLocalThrowingEventSyncState(
   eventId: string,
   syncState: LocalSyncState
 ) {
-  const db = await getLocalDatabase();
-  await db.runAsync(
-    `UPDATE local_throwing_events SET sync_state = ? WHERE id = ?`,
-    syncState,
-    eventId
-  );
+  await withSerializedLocalWrite('updateLocalThrowingEventSyncState', async () => {
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `UPDATE local_throwing_events SET sync_state = ? WHERE id = ?`,
+      syncState,
+      eventId
+    );
+  });
 }
 
 /**
@@ -353,38 +433,40 @@ export async function replaceLocalPitchBreakdownForEvent(
   rows: EventPitchBreakdown[],
   syncState: LocalSyncState = 'synced'
 ) {
-  const db = await getLocalDatabase();
+  await withSerializedLocalWrite('replaceLocalPitchBreakdownForEvent', async () => {
+    const db = await getLocalDatabase();
 
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      `DELETE FROM local_event_pitch_breakdown WHERE coach_id = ? AND event_id = ?`,
-      coachId,
-      eventId
-    );
-
-    for (const row of rows) {
-      const nextRow = toBreakdownRow(coachId, row, syncState);
+    await db.withTransactionAsync(async () => {
       await db.runAsync(
-        `
-          INSERT INTO local_event_pitch_breakdown (
-            id, coach_id, event_id, pitch_type, pitch_count, sync_state
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            coach_id = excluded.coach_id,
-            event_id = excluded.event_id,
-            pitch_type = excluded.pitch_type,
-            pitch_count = excluded.pitch_count,
-            sync_state = excluded.sync_state
-        `,
-        nextRow.id,
-        nextRow.coach_id,
-        nextRow.event_id,
-        nextRow.pitch_type,
-        nextRow.pitch_count,
-        nextRow.sync_state
+        `DELETE FROM local_event_pitch_breakdown WHERE coach_id = ? AND event_id = ?`,
+        coachId,
+        eventId
       );
-    }
+
+      for (const row of rows) {
+        const nextRow = toBreakdownRow(coachId, row, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_event_pitch_breakdown (
+              id, coach_id, event_id, pitch_type, pitch_count, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              event_id = excluded.event_id,
+              pitch_type = excluded.pitch_type,
+              pitch_count = excluded.pitch_count,
+              sync_state = excluded.sync_state
+          `,
+          nextRow.id,
+          nextRow.coach_id,
+          nextRow.event_id,
+          nextRow.pitch_type,
+          nextRow.pitch_count,
+          nextRow.sync_state
+        );
+      }
+    });
   });
 }
 
@@ -394,32 +476,34 @@ export async function upsertLocalPitchBreakdownRows(
   rows: EventPitchBreakdown[],
   syncState: LocalSyncState = 'synced'
 ) {
-  const db = await getLocalDatabase();
+  await withSerializedLocalWrite('upsertLocalPitchBreakdownRows', async () => {
+    const db = await getLocalDatabase();
 
-  await db.withTransactionAsync(async () => {
-    for (const row of rows) {
-      const nextRow = toBreakdownRow(coachId, row, syncState);
-      await db.runAsync(
-        `
-          INSERT INTO local_event_pitch_breakdown (
-            id, coach_id, event_id, pitch_type, pitch_count, sync_state
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            coach_id = excluded.coach_id,
-            event_id = excluded.event_id,
-            pitch_type = excluded.pitch_type,
-            pitch_count = excluded.pitch_count,
-            sync_state = excluded.sync_state
-        `,
-        nextRow.id,
-        nextRow.coach_id,
-        nextRow.event_id,
-        nextRow.pitch_type,
-        nextRow.pitch_count,
-        nextRow.sync_state
-      );
-    }
+    await db.withTransactionAsync(async () => {
+      for (const row of rows) {
+        const nextRow = toBreakdownRow(coachId, row, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_event_pitch_breakdown (
+              id, coach_id, event_id, pitch_type, pitch_count, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              event_id = excluded.event_id,
+              pitch_type = excluded.pitch_type,
+              pitch_count = excluded.pitch_count,
+              sync_state = excluded.sync_state
+          `,
+          nextRow.id,
+          nextRow.coach_id,
+          nextRow.event_id,
+          nextRow.pitch_type,
+          nextRow.pitch_count,
+          nextRow.sync_state
+        );
+      }
+    });
   });
 }
 
@@ -432,17 +516,23 @@ export async function listLocalPitchBreakdownForEventIds(
     return [] as EventPitchBreakdown[];
   }
 
-  const db = await getLocalDatabase();
-  const placeholders = eventIds.map(() => '?').join(', ');
-  return db.getAllAsync<EventPitchBreakdown>(
-    `
-      SELECT id, event_id, pitch_type, pitch_count
-      FROM local_event_pitch_breakdown
-      WHERE coach_id = ? AND event_id IN (${placeholders})
-      ORDER BY pitch_type ASC
-    `,
-    coachId,
-    ...eventIds
+  return withLocalReadFallback(
+    'listLocalPitchBreakdownForEventIds',
+    [] as EventPitchBreakdown[],
+    async () => {
+      const db = await getLocalDatabase();
+      const placeholders = eventIds.map(() => '?').join(', ');
+      return db.getAllAsync<EventPitchBreakdown>(
+        `
+          SELECT id, event_id, pitch_type, pitch_count
+          FROM local_event_pitch_breakdown
+          WHERE coach_id = ? AND event_id IN (${placeholders})
+          ORDER BY pitch_type ASC
+        `,
+        coachId,
+        ...eventIds
+      );
+    }
   );
 }
 
@@ -451,12 +541,14 @@ export async function updateLocalPitchBreakdownSyncState(
   breakdownId: string,
   syncState: LocalSyncState
 ) {
-  const db = await getLocalDatabase();
-  await db.runAsync(
-    `UPDATE local_event_pitch_breakdown SET sync_state = ? WHERE id = ?`,
-    syncState,
-    breakdownId
-  );
+  await withSerializedLocalWrite('updateLocalPitchBreakdownSyncState', async () => {
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `UPDATE local_event_pitch_breakdown SET sync_state = ? WHERE id = ?`,
+      syncState,
+      breakdownId
+    );
+  });
 }
 
 /**
@@ -467,24 +559,26 @@ export async function updateLocalPitchBreakdownSyncState(
 export async function enqueueLocalSyncMutation(
   entry: Omit<LocalQueueEntry, 'retry_count' | 'last_error'>
 ) {
-  const db = await getLocalDatabase();
-  await db.runAsync(
-    `
-      INSERT INTO local_sync_queue (
-        id, coach_id, mutation_type, entity_id, payload_json, status,
-        retry_count, last_error, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
-    `,
-    entry.id,
-    entry.coach_id,
-    entry.mutation_type,
-    entry.entity_id,
-    entry.payload_json,
-    entry.status,
-    entry.created_at,
-    entry.updated_at
-  );
+  await withSerializedLocalWrite('enqueueLocalSyncMutation', async () => {
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `
+        INSERT INTO local_sync_queue (
+          id, coach_id, mutation_type, entity_id, payload_json, status,
+          retry_count, last_error, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)
+      `,
+      entry.id,
+      entry.coach_id,
+      entry.mutation_type,
+      entry.entity_id,
+      entry.payload_json,
+      entry.status,
+      entry.created_at,
+      entry.updated_at
+    );
+  });
 }
 
 /** Lists queued mutations for a coach, ordered oldest-first for deterministic replay. */
@@ -496,18 +590,24 @@ export async function listLocalSyncQueueEntries(
     return [] as LocalQueueEntry[];
   }
 
-  const db = await getLocalDatabase();
-  const placeholders = statuses.map(() => '?').join(', ');
+  return withLocalReadFallback(
+    'listLocalSyncQueueEntries',
+    [] as LocalQueueEntry[],
+    async () => {
+      const db = await getLocalDatabase();
+      const placeholders = statuses.map(() => '?').join(', ');
 
-  return db.getAllAsync<LocalQueueEntry>(
-    `
-      SELECT *
-      FROM local_sync_queue
-      WHERE coach_id = ? AND status IN (${placeholders})
-      ORDER BY created_at ASC, rowid ASC
-    `,
-    coachId,
-    ...statuses
+      return db.getAllAsync<LocalQueueEntry>(
+        `
+          SELECT *
+          FROM local_sync_queue
+          WHERE coach_id = ? AND status IN (${placeholders})
+          ORDER BY created_at ASC, rowid ASC
+        `,
+        coachId,
+        ...statuses
+      );
+    }
   );
 }
 
@@ -518,51 +618,55 @@ export async function updateLocalSyncQueueEntry(
   lastError: string | null = null,
   retryCount?: number
 ) {
-  const db = await getLocalDatabase();
-  const updatedAt = new Date().toISOString();
+  await withSerializedLocalWrite('updateLocalSyncQueueEntry', async () => {
+    const db = await getLocalDatabase();
+    const updatedAt = new Date().toISOString();
 
-  if (typeof retryCount === 'number') {
+    if (typeof retryCount === 'number') {
+      await db.runAsync(
+        `
+          UPDATE local_sync_queue
+          SET status = ?, last_error = ?, retry_count = ?, updated_at = ?
+          WHERE id = ?
+        `,
+        status,
+        lastError,
+        retryCount,
+        updatedAt,
+        queueId
+      );
+      return;
+    }
+
     await db.runAsync(
       `
         UPDATE local_sync_queue
-        SET status = ?, last_error = ?, retry_count = ?, updated_at = ?
+        SET status = ?, last_error = ?, updated_at = ?
         WHERE id = ?
       `,
       status,
       lastError,
-      retryCount,
       updatedAt,
       queueId
     );
-    return;
-  }
-
-  await db.runAsync(
-    `
-      UPDATE local_sync_queue
-      SET status = ?, last_error = ?, updated_at = ?
-      WHERE id = ?
-    `,
-    status,
-    lastError,
-    updatedAt,
-    queueId
-  );
+  });
 }
 
 /** Counts queue entries that still need sync work for one coach. */
 export async function countUnsyncedQueueEntries(coachId: string) {
-  const db = await getLocalDatabase();
-  const rows = await db.getAllAsync<{ count: number }>(
-    `
-      SELECT COUNT(*) as count
-      FROM local_sync_queue
-      WHERE coach_id = ? AND status != 'synced'
-    `,
-    coachId
-  );
+  return withLocalReadFallback('countUnsyncedQueueEntries', 0, async () => {
+    const db = await getLocalDatabase();
+    const rows = await db.getAllAsync<{ count: number }>(
+      `
+        SELECT COUNT(*) as count
+        FROM local_sync_queue
+        WHERE coach_id = ? AND status != 'synced'
+      `,
+      coachId
+    );
 
-  return rows[0]?.count ?? 0;
+    return rows[0]?.count ?? 0;
+  });
 }
 
 /**
@@ -575,17 +679,19 @@ export async function countUnsyncedQueueEntries(coachId: string) {
  * @returns promise that resolves when all local offline tables are cleared
  */
 export async function clearLocalOfflineData() {
-  const db = await getLocalDatabase();
+  await withSerializedLocalWrite('clearLocalOfflineData', async () => {
+    const db = await getLocalDatabase();
 
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(`DELETE FROM local_sync_queue`);
-    await db.runAsync(`DELETE FROM local_event_pitch_breakdown`);
-    await db.runAsync(`DELETE FROM local_throwing_events`);
-    await db.runAsync(`DELETE FROM local_pitcher_profiles`);
-    await db.runAsync(`DELETE FROM sync_queue`);
-    await db.runAsync(`DELETE FROM cached_event_pitch_breakdown`);
-    await db.runAsync(`DELETE FROM cached_throwing_events`);
-    await db.runAsync(`DELETE FROM cached_pitcher_profiles`);
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(`DELETE FROM local_sync_queue`);
+      await db.runAsync(`DELETE FROM local_event_pitch_breakdown`);
+      await db.runAsync(`DELETE FROM local_throwing_events`);
+      await db.runAsync(`DELETE FROM local_pitcher_profiles`);
+      await db.runAsync(`DELETE FROM sync_queue`);
+      await db.runAsync(`DELETE FROM cached_event_pitch_breakdown`);
+      await db.runAsync(`DELETE FROM cached_throwing_events`);
+      await db.runAsync(`DELETE FROM cached_pitcher_profiles`);
+    });
   });
 }
 
