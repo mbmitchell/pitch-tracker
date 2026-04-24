@@ -500,7 +500,7 @@ export async function listLocalSyncQueueEntries(
       SELECT *
       FROM local_sync_queue
       WHERE coach_id = ? AND status IN (${placeholders})
-      ORDER BY created_at ASC
+      ORDER BY created_at ASC, rowid ASC
     `,
     coachId,
     ...statuses

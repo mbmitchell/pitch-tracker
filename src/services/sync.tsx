@@ -1,24 +1,46 @@
 import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   countUnsyncedQueueEntries,
   enqueueLocalSyncMutation,
+  LocalQueueEntry,
+  LocalSyncState,
   listLocalSyncQueueEntries,
+  updateLocalPitchBreakdownSyncState,
+  updateLocalPitcherSyncState,
+  updateLocalSyncQueueEntry,
+  updateLocalThrowingEventSyncState,
+  upsertLocalPitchBreakdownRows,
+  upsertLocalPitcher,
+  upsertLocalThrowingEvent,
 } from '@/services/localData';
 import { useAuth } from '@/services/auth';
+import {
+  EventPitchBreakdown,
+  EventPitchBreakdownInsert,
+  PitcherProfile,
+  PitcherProfileInsert,
+  PitcherProfileUpdate,
+  ThrowingEvent,
+  ThrowingEventInsert,
+} from '@/types/models';
 
 type SyncIndicatorState = {
   isOnline: boolean;
   isSyncing: boolean;
   pendingCount: number;
+  failedCount: number;
   label: string;
 };
 
 const SyncContext = createContext<SyncIndicatorState | null>(null);
 
 let onlineState = true;
+const syncingByCoach = new Map<string, Promise<void>>();
 const syncListeners = new Set<() => void>();
+const MAX_SYNC_RETRY_ATTEMPTS = 3;
 
 function notifySyncListeners() {
   syncListeners.forEach((listener) => listener());
@@ -44,14 +66,183 @@ export async function refreshPendingSyncCount(coachId: string) {
 }
 
 /**
- * Placeholder for future queue processing.
+ * Counts currently failed queue items for one coach.
+ *
+ * @param coachId - authenticated coach id
+ * @returns count of failed queue entries
+ */
+export async function refreshFailedSyncCount(coachId: string) {
+  const failedEntries = await listLocalSyncQueueEntries(coachId, ['failed']);
+  return failedEntries.length;
+}
+
+function getSupabaseClient() {
+  return supabase as any;
+}
+
+async function syncCreatePitcher(coachId: string, queueEntry: LocalQueueEntry) {
+  const supabaseClient = getSupabaseClient();
+  const payload = JSON.parse(queueEntry.payload_json) as PitcherProfileInsert;
+
+  const { data, error } = await supabaseClient
+    .from('pitcher_profiles')
+    .upsert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await upsertLocalPitcher(coachId, data as PitcherProfile, 'synced');
+  await updateLocalPitcherSyncState(queueEntry.entity_id, 'synced');
+}
+
+async function syncUpdatePitcher(coachId: string, queueEntry: LocalQueueEntry) {
+  const supabaseClient = getSupabaseClient();
+  const payload = JSON.parse(queueEntry.payload_json) as PitcherProfileUpdate & {
+    id: string;
+  };
+
+  const { data, error } = await supabaseClient
+    .from('pitcher_profiles')
+    .update(payload)
+    .eq('id', payload.id)
+    .eq('created_by', coachId)
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    throw new Error('Pitcher profile not found during sync.');
+  }
+
+  await upsertLocalPitcher(coachId, data as PitcherProfile, 'synced');
+  await updateLocalPitcherSyncState(queueEntry.entity_id, 'synced');
+}
+
+async function syncCreateThrowingEvent(coachId: string, queueEntry: LocalQueueEntry) {
+  const supabaseClient = getSupabaseClient();
+  const payload = JSON.parse(queueEntry.payload_json) as ThrowingEventInsert;
+
+  const { data, error } = await supabaseClient
+    .from('throwing_events')
+    .upsert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await upsertLocalThrowingEvent(coachId, data as ThrowingEvent, 'synced');
+  await updateLocalThrowingEventSyncState(queueEntry.entity_id, 'synced');
+}
+
+async function syncCreatePitchBreakdown(coachId: string, queueEntry: LocalQueueEntry) {
+  const supabaseClient = getSupabaseClient();
+  const payload = JSON.parse(queueEntry.payload_json) as EventPitchBreakdownInsert;
+
+  const { data, error } = await supabaseClient
+    .from('event_pitch_breakdown')
+    .upsert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await upsertLocalPitchBreakdownRows(coachId, [data as EventPitchBreakdown], 'synced');
+  await updateLocalPitchBreakdownSyncState(queueEntry.entity_id, 'synced');
+}
+
+async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
+  await updateLocalSyncQueueEntry(queueEntry.id, 'syncing', null, queueEntry.retry_count);
+  notifySyncListeners();
+
+  switch (queueEntry.mutation_type) {
+    case 'create_pitcher':
+      await syncCreatePitcher(coachId, queueEntry);
+      break;
+    case 'update_pitcher':
+      await syncUpdatePitcher(coachId, queueEntry);
+      break;
+    case 'create_throwing_event':
+      await syncCreateThrowingEvent(coachId, queueEntry);
+      break;
+    case 'create_pitch_breakdown':
+      await syncCreatePitchBreakdown(coachId, queueEntry);
+      break;
+    default:
+      throw new Error(`Unsupported sync mutation: ${queueEntry.mutation_type}`);
+  }
+
+  await updateLocalSyncQueueEntry(queueEntry.id, 'synced', null, queueEntry.retry_count);
+}
+
+/**
+ * Processes queued local mutations for a coach in FIFO order.
+ *
+ * Parent-child ordering is preserved by queue order so offline-created pitchers
+ * sync before their events, and events sync before their pitch breakdown rows.
  *
  * @param coachId - authenticated coach id
  */
 export async function processPendingSyncQueueForCoach(coachId: string) {
-  if (coachId) {
-    notifySyncListeners();
+  if (!coachId || !getIsOnline() || !isSupabaseConfigured) {
+    return;
   }
+
+  const existing = syncingByCoach.get(coachId);
+  if (existing) {
+    return existing;
+  }
+
+  const syncPromise = (async () => {
+    const entries = await listLocalSyncQueueEntries(coachId, ['pending', 'failed']);
+
+    for (const entry of entries) {
+      if (entry.retry_count >= MAX_SYNC_RETRY_ATTEMPTS) {
+        continue;
+      }
+
+      try {
+        await processQueueEntry(coachId, entry);
+      } catch (error) {
+        const nextRetryCount = entry.retry_count + 1;
+        await updateLocalSyncQueueEntry(
+          entry.id,
+          'failed',
+          error instanceof Error ? error.message : 'Sync failed.',
+          nextRetryCount
+        );
+        notifySyncListeners();
+        break;
+      }
+    }
+  })().finally(() => {
+    syncingByCoach.delete(coachId);
+    notifySyncListeners();
+  });
+
+  syncingByCoach.set(coachId, syncPromise);
+  notifySyncListeners();
+  return syncPromise;
+}
+
+/**
+ * Manually triggers queue processing for one coach.
+ *
+ * Useful for testing and for future pull-to-sync style actions.
+ *
+ * @param coachId - authenticated coach id
+ */
+export async function triggerSyncNowForCoach(coachId: string) {
+  return processPendingSyncQueueForCoach(coachId);
 }
 
 /**
@@ -65,7 +256,8 @@ export async function processPendingSyncQueueForCoach(coachId: string) {
 export function buildSyncIndicatorLabel(
   isOnline: boolean,
   isSyncing: boolean,
-  pendingCount: number
+  pendingCount: number,
+  failedCount: number
 ) {
   if (!isOnline) {
     return 'Offline';
@@ -73,6 +265,10 @@ export function buildSyncIndicatorLabel(
 
   if (isSyncing) {
     return 'Syncing';
+  }
+
+  if (failedCount > 0) {
+    return `${failedCount} sync issue${failedCount === 1 ? '' : 's'}`;
   }
 
   if (pendingCount > 0) {
@@ -108,6 +304,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   const netInfo = useNetInfo();
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
 
   const isOnline = Boolean(
     netInfo.isConnected && (netInfo.isInternetReachable ?? true)
@@ -125,18 +322,21 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       if (!user?.id) {
         if (isActive) {
           setPendingCount(0);
+          setFailedCount(0);
           setIsSyncing(false);
         }
         return;
       }
 
-      const [nextCount, syncingEntries] = await Promise.all([
+      const [nextCount, nextFailedCount, syncingEntries] = await Promise.all([
         refreshPendingSyncCount(user.id),
+        refreshFailedSyncCount(user.id),
         listLocalSyncQueueEntries(user.id, ['syncing']),
       ]);
 
       if (isActive) {
         setPendingCount(nextCount);
+        setFailedCount(nextFailedCount);
         setIsSyncing(syncingEntries.length > 0);
       }
     }
@@ -151,6 +351,30 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   useEffect(() => {
+    let isActive = true;
+
+    async function syncIfNeeded() {
+      if (!user?.id || !isOnline || !isSupabaseConfigured) {
+        return;
+      }
+
+      const nextCount = await refreshPendingSyncCount(user.id);
+
+      if (!nextCount || !isActive) {
+        return;
+      }
+
+      await processPendingSyncQueueForCoach(user.id);
+    }
+
+    void syncIfNeeded();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isOnline, user?.id]);
+
+  useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
       onlineState = Boolean(state.isConnected && (state.isInternetReachable ?? true));
     });
@@ -163,9 +387,10 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
       isOnline,
       isSyncing,
       pendingCount,
-      label: buildSyncIndicatorLabel(isOnline, isSyncing, pendingCount),
+      failedCount,
+      label: buildSyncIndicatorLabel(isOnline, isSyncing, pendingCount, failedCount),
     }),
-    [isOnline, isSyncing, pendingCount]
+    [failedCount, isOnline, isSyncing, pendingCount]
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

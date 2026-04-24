@@ -9,15 +9,24 @@ type SyncStatusBannerProps = {
 };
 
 function bannerTone({
+  failedCount,
   isOnline,
   isSyncing,
   pendingCount,
 }: {
+  failedCount: number;
   isOnline: boolean;
   isSyncing: boolean;
   pendingCount: number;
 }) {
   if (!isOnline) {
+    return {
+      backgroundColor: colors.dangerSoft,
+      color: colors.danger,
+    };
+  }
+
+  if (failedCount > 0) {
     return {
       backgroundColor: colors.dangerSoft,
       color: colors.danger,
@@ -39,13 +48,13 @@ function bannerTone({
 
 export function SyncStatusBanner({ floating = false }: SyncStatusBannerProps) {
   const { isAuthenticated } = useAuth();
-  const { isOnline, isSyncing, label, pendingCount } = useSyncStatus();
+  const { failedCount, isOnline, isSyncing, label, pendingCount } = useSyncStatus();
 
   if (!isAuthenticated) {
     return null;
   }
 
-  const tone = bannerTone({ isOnline, isSyncing, pendingCount });
+  const tone = bannerTone({ failedCount, isOnline, isSyncing, pendingCount });
 
   return (
     <View
