@@ -6,10 +6,15 @@ import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { clearLocalOfflineData } from '@/services/localData';
 
 type AuthAction = 'signIn' | 'signUp' | 'signOut' | 'resetPassword' | null;
+export type AccountType = 'coach' | 'player';
 
 type Credentials = {
   email: string;
   password: string;
+};
+
+type SignUpCredentials = Credentials & {
+  accountType: AccountType;
 };
 
 type SignInResult = {
@@ -36,6 +41,9 @@ type PasswordResetResult = {
 type AuthContextValue = {
   session: Session | null;
   user: User | null;
+  accountType: AccountType;
+  isPlayerAccount: boolean;
+  profileAccessRefreshKey: number;
   isAuthenticated: boolean;
   isBootstrapping: boolean;
   authError: string | null;
@@ -44,9 +52,10 @@ type AuthContextValue = {
   isSigningOut: boolean;
   isRequestingPasswordReset: boolean;
   signIn: (credentials: Credentials) => Promise<SignInResult>;
-  signUp: (credentials: Credentials) => Promise<SignUpResult>;
+  signUp: (credentials: SignUpCredentials) => Promise<SignUpResult>;
   signOut: () => Promise<SignOutResult>;
   requestPasswordReset: (email: string) => Promise<PasswordResetResult>;
+  refreshProfileAccess: () => void;
   clearAuthError: () => void;
 };
 
@@ -54,6 +63,10 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const missingConfigMessage =
   'Supabase Auth is not configured yet. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to continue.';
+
+function getAccountTypeFromUser(user: User | null): AccountType {
+  return user?.user_metadata?.account_type === 'player' ? 'player' : 'coach';
+}
 
 /**
  * Provides the authenticated Supabase session and Phase 1 auth actions to the app.
@@ -67,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authAction, setAuthAction] = useState<AuthAction>(null);
+  const [profileAccessRefreshKey, setProfileAccessRefreshKey] = useState(0);
 
   useEffect(() => {
     function handleAppStateChange(state: AppStateStatus) {
@@ -132,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: false, error: missingConfigMessage };
     }
 
-    setAuthAction('resetPassword');
+    setAuthAction('signIn');
 
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -149,7 +163,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }
 
-  async function signUp({ email, password }: Credentials): Promise<SignUpResult> {
+  async function signUp({
+    accountType,
+    email,
+    password,
+  }: SignUpCredentials): Promise<SignUpResult> {
     setAuthError(null);
 
     if (!isSupabaseConfigured) {
@@ -169,6 +187,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: {
+        data: {
+          account_type: accountType,
+        },
+      },
     });
 
     setAuthAction(null);
@@ -239,6 +262,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       user,
+      accountType: getAccountTypeFromUser(user),
+      isPlayerAccount: getAccountTypeFromUser(user) === 'player',
+      profileAccessRefreshKey,
       isAuthenticated: Boolean(session?.user),
       isBootstrapping,
       authError,
@@ -250,9 +276,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       signOut,
       requestPasswordReset,
+      refreshProfileAccess: () => {
+        setProfileAccessRefreshKey((value) => value + 1);
+      },
       clearAuthError: () => setAuthError(null),
     }),
-    [authAction, authError, isBootstrapping, session, user]
+    [authAction, authError, isBootstrapping, profileAccessRefreshKey, session, user]
   );
 
   return (

@@ -15,7 +15,7 @@ import {
 } from '@/types/models';
 import { validateThrowingEventInput } from '@/utils/validation';
 
-import { getPitcherByIdForCoach } from '@/services/pitchers';
+import { getLinkedPitcherProfileForUser, getPitcherByIdForCoach } from '@/services/pitchers';
 import {
   generateClientId,
   getLocalPitcherByIdForCoach,
@@ -23,6 +23,7 @@ import {
   listLocalThrowingEventsForCoach,
   listLocalThrowingEventsForPitcher,
   replaceLocalPitchBreakdownForEvent,
+  upsertLocalPitcher,
   upsertLocalPitchBreakdownRows,
   upsertLocalThrowingEvent,
   upsertLocalThrowingEvents,
@@ -117,6 +118,20 @@ async function fetchThrowingEventsForPitcherFromRemote(
     ...event,
     event_pitch_breakdown: event.event_pitch_breakdown ?? [],
   }));
+}
+
+async function fetchAccessiblePitcherFromRemote(pitcherId: string) {
+  const { data, error } = await supabaseClient
+    .from('pitcher_profiles')
+    .select('*')
+    .eq('id', pitcherId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? null) as PitcherProfile | null;
 }
 
 async function fetchThrowingEventsForCoachFromRemote(coachId: string, limit: number) {
@@ -293,6 +308,144 @@ async function triggerSyncIfOnline(coachId: string) {
   await refreshPendingSyncCount(coachId);
 }
 
+async function resolveAccessiblePitcherForUser(userId: string, pitcherId: string) {
+  const localPitcher = await getLocalPitcherByIdForCoach(userId, pitcherId);
+
+  if (localPitcher) {
+    return localPitcher;
+  }
+
+  const coachOwnedPitcher = await getPitcherByIdForCoach(pitcherId, userId);
+
+  if (coachOwnedPitcher) {
+    return coachOwnedPitcher;
+  }
+
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const remotePitcher = await fetchAccessiblePitcherFromRemote(pitcherId);
+
+  if (remotePitcher) {
+    try {
+      await upsertLocalPitcher(userId, remotePitcher, 'synced');
+    } catch (cacheError) {
+      reportLocalCacheWriteError('upsertLocalPitcher', cacheError);
+    }
+  }
+
+  return remotePitcher;
+}
+
+async function persistThrowingEventForOwner(
+  ownerId: string,
+  pitcher: PitcherProfile,
+  input: ThrowingEventInput
+) {
+  const normalizedInput = normalizeThrowingEventInput(input);
+  const validationError = validateThrowingEventInput(normalizedInput);
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const now = new Date().toISOString();
+  const eventId = generateClientId('event');
+
+  const event: ThrowingEvent = {
+    id: eventId,
+    pitcher_id: normalizedInput.pitcher_id,
+    date: normalizedInput.date,
+    event_type: normalizedInput.event_type,
+    total_pitches: normalizedInput.total_pitches,
+    innings_thrown: normalizedInput.innings_thrown,
+    intensity: normalizedInput.intensity,
+    arm_feel: normalizedInput.arm_feel,
+    bullpen_focus: normalizedInput.bullpen_focus,
+    notes: normalizedInput.notes,
+    entered_by_user_id: ownerId,
+    source_type: normalizedInput.source_type ?? 'coach',
+    created_at: now,
+    updated_at: now,
+  };
+
+  const breakdownRows: EventPitchBreakdown[] = (normalizedInput.pitch_breakdown ?? []).map(
+    (item) => ({
+      id: generateClientId('breakdown'),
+      event_id: eventId,
+      pitch_type: item.pitch_type,
+      pitch_count: item.pitch_count,
+    })
+  );
+
+  const eventPayload: ThrowingEventInsert = { ...event };
+  const breakdownPayload = breakdownRows.map<EventPitchBreakdownInsert>((row) => ({ ...row }));
+
+  if (canUseRemote()) {
+    const createdEvent = await createThrowingEventInRemote(eventPayload);
+    const createdBreakdownRows = await createPitchBreakdownRowsInRemote(breakdownPayload);
+
+    await upsertLocalPitcher(ownerId, pitcher, 'synced');
+    await upsertLocalThrowingEvent(ownerId, createdEvent, 'synced');
+
+    if (createdBreakdownRows.length) {
+      await replaceLocalPitchBreakdownForEvent(
+        ownerId,
+        createdEvent.id,
+        createdBreakdownRows,
+        'synced'
+      );
+    }
+
+    await triggerSyncIfOnline(ownerId);
+
+    return {
+      event: createdEvent,
+      event_pitch_breakdown: createdBreakdownRows,
+      pitcher,
+    };
+  }
+
+  await upsertLocalPitcher(ownerId, pitcher, 'pending');
+  await upsertLocalThrowingEvent(ownerId, event, 'pending');
+  await queueLocalSyncMutation({
+    id: generateClientId('queue'),
+    coach_id: ownerId,
+    mutation_type: 'create_throwing_event',
+    entity_id: event.id,
+    payload_json: JSON.stringify(eventPayload),
+    status: 'pending',
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (breakdownRows.length) {
+    await upsertLocalPitchBreakdownRows(ownerId, breakdownRows, 'pending');
+
+    for (const row of breakdownRows) {
+      await queueLocalSyncMutation({
+        id: generateClientId('queue'),
+        coach_id: ownerId,
+        mutation_type: 'create_pitch_breakdown',
+        entity_id: row.id,
+        payload_json: JSON.stringify({ ...row } satisfies EventPitchBreakdownInsert),
+        status: 'pending',
+        created_at: now,
+        updated_at: now,
+      });
+    }
+  }
+
+  await triggerSyncIfOnline(ownerId);
+
+  return {
+    event,
+    event_pitch_breakdown: breakdownRows,
+    pitcher,
+  };
+}
+
 /**
  * Creates a throwing event for a coach-owned pitcher and queues it for sync.
  *
@@ -315,107 +468,42 @@ export async function createThrowingEventForCoach(
     throw new Error('Pitcher profile not found for this coach.');
   }
 
-  const normalizedInput = normalizeThrowingEventInput(input);
-  const validationError = validateThrowingEventInput(normalizedInput);
-
-  if (validationError) {
-    throw new Error(validationError);
-  }
-
-  const now = new Date().toISOString();
-  const eventId = generateClientId('event');
-
-  const event: ThrowingEvent = {
-    id: eventId,
-    pitcher_id: normalizedInput.pitcher_id,
-    date: normalizedInput.date,
-    event_type: normalizedInput.event_type,
-    total_pitches: normalizedInput.total_pitches,
-    innings_thrown: normalizedInput.innings_thrown,
-    intensity: normalizedInput.intensity,
-    arm_feel: normalizedInput.arm_feel,
-    bullpen_focus: normalizedInput.bullpen_focus,
-    notes: normalizedInput.notes,
-    entered_by_user_id: coachId,
-    source_type: normalizedInput.source_type ?? 'coach',
-    created_at: now,
-    updated_at: now,
-  };
-
-  // Breakdown rows get stable client ids up front so offline-created events and
-  // their child rows can be synced without a second reconciliation pass.
-  const breakdownRows: EventPitchBreakdown[] = (normalizedInput.pitch_breakdown ?? []).map(
-    (item) => ({
-      id: generateClientId('breakdown'),
-      event_id: eventId,
-      pitch_type: item.pitch_type,
-      pitch_count: item.pitch_count,
-    })
-  );
-
-  const eventPayload: ThrowingEventInsert = { ...event };
-  const breakdownPayload = breakdownRows.map<EventPitchBreakdownInsert>((row) => ({ ...row }));
-
-  if (canUseRemote()) {
-    const createdEvent = await createThrowingEventInRemote(eventPayload);
-    const createdBreakdownRows = await createPitchBreakdownRowsInRemote(breakdownPayload);
-
-    await upsertLocalThrowingEvent(coachId, createdEvent, 'synced');
-
-    if (createdBreakdownRows.length) {
-      await replaceLocalPitchBreakdownForEvent(
-        coachId,
-        createdEvent.id,
-        createdBreakdownRows,
-        'synced'
-      );
-    }
-
-    await triggerSyncIfOnline(coachId);
-
-    return {
-      event: createdEvent,
-      event_pitch_breakdown: createdBreakdownRows,
-      pitcher,
-    };
-  }
-
-  await upsertLocalThrowingEvent(coachId, event, 'pending');
-  await queueLocalSyncMutation({
-    id: generateClientId('queue'),
-    coach_id: coachId,
-    mutation_type: 'create_throwing_event',
-    entity_id: event.id,
-    payload_json: JSON.stringify(eventPayload),
-    status: 'pending',
-    created_at: now,
-    updated_at: now,
+  return persistThrowingEventForOwner(coachId, pitcher, {
+    ...input,
+    pitcher_id: pitcher.id,
+    source_type: input.source_type ?? 'coach',
   });
+}
 
-  if (breakdownRows.length) {
-    await upsertLocalPitchBreakdownRows(coachId, breakdownRows, 'pending');
+/**
+ * Creates a self-logged throwing event for the signed-in linked pitcher account.
+ *
+ * The player can only log events for the one pitcher profile linked to their auth
+ * account, and the saved source type is forced to `player`.
+ *
+ * @param userId - authenticated pitcher user id
+ * @param input - validated event payload from the player log-work flow
+ * @returns locally persisted event record with optional pitch breakdown rows
+ */
+export async function createThrowingEventForPlayer(
+  userId: string,
+  input: ThrowingEventInput
+) {
+  const linkedPitcher = await getLinkedPitcherProfileForUser(userId);
 
-    for (const row of breakdownRows) {
-      await queueLocalSyncMutation({
-        id: generateClientId('queue'),
-        coach_id: coachId,
-        mutation_type: 'create_pitch_breakdown',
-        entity_id: row.id,
-        payload_json: JSON.stringify({ ...row } satisfies EventPitchBreakdownInsert),
-        status: 'pending',
-        created_at: now,
-        updated_at: now,
-      });
-    }
+  if (!linkedPitcher) {
+    throw new Error('Finish player setup before logging completed work.');
   }
 
-  await triggerSyncIfOnline(coachId);
+  if (linkedPitcher.id !== input.pitcher_id) {
+    throw new Error('Player accounts can only log work for their linked pitcher profile.');
+  }
 
-  return {
-    event,
-    event_pitch_breakdown: breakdownRows,
-    pitcher,
-  };
+  return persistThrowingEventForOwner(userId, linkedPitcher, {
+    ...input,
+    pitcher_id: linkedPitcher.id,
+    source_type: 'player',
+  });
 }
 
 /**
@@ -430,19 +518,17 @@ export async function createThrowingEventForCoach(
  * @returns pitcher profile with hydrated throwing history and breakdown rows
  */
 export async function listThrowingEventsForPitcher(
-  coachId: string,
+  userId: string,
   pitcherId: string,
   limit = 10
 ) {
-  const pitcher =
-    (await getLocalPitcherByIdForCoach(coachId, pitcherId)) ??
-    (await getPitcherByIdForCoach(pitcherId, coachId));
+  const pitcher = await resolveAccessiblePitcherForUser(userId, pitcherId);
 
   if (!pitcher) {
-    throw new Error('Pitcher profile not found for this coach.');
+    throw new Error('Pitcher profile not found for this account.');
   }
 
-  const localEvents = await getCachedThrowingEventsForPitcher(coachId, pitcherId, limit);
+  const localEvents = await getCachedThrowingEventsForPitcher(userId, pitcherId, limit);
 
   if (!canUseRemote()) {
     return {
@@ -457,7 +543,7 @@ export async function listThrowingEventsForPitcher(
     let cachedEvents: ThrowingEventRecord[];
 
     try {
-      cachedEvents = await cacheThrowingEventHistory(coachId, pitcherId, remoteEvents, limit);
+      cachedEvents = await cacheThrowingEventHistory(userId, pitcherId, remoteEvents, limit);
     } catch (cacheError) {
       reportLocalCacheWriteError('cacheThrowingEventHistory', cacheError);
       cachedEvents = remoteEvents;

@@ -1,5 +1,6 @@
 import { getLocalDatabase } from '@/lib/localDatabase';
 import {
+  AssignedWorkout,
   EventPitchBreakdown,
   PitcherProfile,
   ThrowingEvent,
@@ -12,7 +13,8 @@ export type LocalQueueMutationType =
   | 'create_pitcher'
   | 'update_pitcher'
   | 'create_throwing_event'
-  | 'create_pitch_breakdown';
+  | 'create_pitch_breakdown'
+  | 'update_assigned_workout';
 
 export type LocalQueueEntry = {
   id: string;
@@ -40,6 +42,13 @@ type LocalEventRow = ThrowingEvent & {
 
 type LocalBreakdownRow = EventPitchBreakdown & {
   coach_id: string;
+  sync_state: LocalSyncState;
+};
+
+type LocalAssignedWorkoutRow = Omit<AssignedWorkout, 'pitch_mix' | 'work_blocks'> & {
+  coach_id: string;
+  pitch_mix_json: string;
+  work_blocks_json: string;
   sync_state: LocalSyncState;
 };
 
@@ -149,6 +158,46 @@ function toBreakdownRow(
     ...row,
     coach_id: coachId,
     sync_state: syncState,
+  };
+}
+
+function toAssignedWorkoutRow(
+  coachId: string,
+  workout: AssignedWorkout,
+  syncState: LocalSyncState
+): LocalAssignedWorkoutRow {
+  return {
+    ...workout,
+    coach_id: coachId,
+    pitch_mix_json: JSON.stringify(workout.pitch_mix ?? []),
+    work_blocks_json: JSON.stringify(workout.work_blocks ?? []),
+    sync_state: syncState,
+  };
+}
+
+function fromAssignedWorkoutRow(row: LocalAssignedWorkoutRow): AssignedWorkout & {
+  sync_state?: LocalSyncState;
+} {
+  return {
+    id: row.id,
+    pitcher_id: row.pitcher_id,
+    assigned_by_user_id: row.assigned_by_user_id,
+    planned_date: row.planned_date,
+    title: row.title,
+    focus: row.focus,
+    target_pitch_count: row.target_pitch_count,
+    intensity: row.intensity,
+    pitch_mix: JSON.parse(row.pitch_mix_json ?? '[]'),
+    work_blocks: JSON.parse(row.work_blocks_json ?? '[]'),
+    coach_notes: row.coach_notes,
+    status: row.status,
+    viewed_at: row.viewed_at,
+    completed_at: row.completed_at,
+    pitcher_feedback: row.pitcher_feedback,
+    completed_throwing_event_id: row.completed_throwing_event_id,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    sync_state: row.sync_state,
   };
 }
 
@@ -551,6 +600,240 @@ export async function updateLocalPitchBreakdownSyncState(
   });
 }
 
+/** Lists cached assigned workouts for one owner and optional pitcher scope. */
+export async function listLocalAssignedWorkouts(
+  coachId: string,
+  pitcherId?: string
+) {
+  return withLocalReadFallback(
+    'listLocalAssignedWorkouts',
+    [] as Array<AssignedWorkout & { sync_state?: LocalSyncState }>,
+    async () => {
+      const db = await getLocalDatabase();
+
+      if (pitcherId) {
+        const rows = await db.getAllAsync<LocalAssignedWorkoutRow>(
+          `
+            SELECT *
+            FROM local_assigned_workouts
+            WHERE coach_id = ? AND pitcher_id = ?
+            ORDER BY planned_date ASC, created_at DESC
+          `,
+          coachId,
+          pitcherId
+        );
+
+        return rows.map(fromAssignedWorkoutRow);
+      }
+
+      const rows = await db.getAllAsync<LocalAssignedWorkoutRow>(
+        `
+          SELECT *
+          FROM local_assigned_workouts
+          WHERE coach_id = ?
+          ORDER BY planned_date ASC, created_at DESC
+        `,
+        coachId
+      );
+
+      return rows.map(fromAssignedWorkoutRow);
+    }
+  );
+}
+
+/** Loads one cached assigned workout for one owner. */
+export async function getLocalAssignedWorkoutById(
+  coachId: string,
+  workoutId: string
+) {
+  return withLocalReadFallback(
+    'getLocalAssignedWorkoutById',
+    null as (AssignedWorkout & { sync_state?: LocalSyncState }) | null,
+    async () => {
+      const db = await getLocalDatabase();
+      const rows = await db.getAllAsync<LocalAssignedWorkoutRow>(
+        `
+          SELECT *
+          FROM local_assigned_workouts
+          WHERE coach_id = ? AND id = ?
+          LIMIT 1
+        `,
+        coachId,
+        workoutId
+      );
+
+      return rows[0] ? fromAssignedWorkoutRow(rows[0]) : null;
+    }
+  );
+}
+
+/** Replaces all cached assigned workouts for one owner/pitcher scope. */
+export async function replaceLocalAssignedWorkoutsForPitcher(
+  coachId: string,
+  pitcherId: string,
+  workouts: AssignedWorkout[],
+  syncState: LocalSyncState = 'synced'
+) {
+  await withSerializedLocalWrite('replaceLocalAssignedWorkoutsForPitcher', async () => {
+    const db = await getLocalDatabase();
+
+    await db.withTransactionAsync(async () => {
+      await db.runAsync(
+        `DELETE FROM local_assigned_workouts WHERE coach_id = ? AND pitcher_id = ?`,
+        coachId,
+        pitcherId
+      );
+
+      for (const workout of workouts) {
+        const row = toAssignedWorkoutRow(coachId, workout, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_assigned_workouts (
+              id, coach_id, pitcher_id, assigned_by_user_id, planned_date, title, focus,
+              target_pitch_count, intensity, pitch_mix_json, work_blocks_json, coach_notes,
+              status, viewed_at, completed_at, pitcher_feedback, completed_throwing_event_id,
+              created_at, updated_at, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              pitcher_id = excluded.pitcher_id,
+              assigned_by_user_id = excluded.assigned_by_user_id,
+              planned_date = excluded.planned_date,
+              title = excluded.title,
+              focus = excluded.focus,
+              target_pitch_count = excluded.target_pitch_count,
+              intensity = excluded.intensity,
+              pitch_mix_json = excluded.pitch_mix_json,
+              work_blocks_json = excluded.work_blocks_json,
+              coach_notes = excluded.coach_notes,
+              status = excluded.status,
+              viewed_at = excluded.viewed_at,
+              completed_at = excluded.completed_at,
+              pitcher_feedback = excluded.pitcher_feedback,
+              completed_throwing_event_id = excluded.completed_throwing_event_id,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at,
+              sync_state = excluded.sync_state
+          `,
+          row.id,
+          row.coach_id,
+          row.pitcher_id,
+          row.assigned_by_user_id,
+          row.planned_date,
+          row.title,
+          row.focus,
+          row.target_pitch_count,
+          row.intensity,
+          row.pitch_mix_json,
+          row.work_blocks_json,
+          row.coach_notes,
+          row.status,
+          row.viewed_at,
+          row.completed_at,
+          row.pitcher_feedback,
+          row.completed_throwing_event_id,
+          row.created_at,
+          row.updated_at,
+          row.sync_state
+        );
+      }
+    });
+  });
+}
+
+/** Upserts assigned workouts into the local cache. */
+export async function upsertLocalAssignedWorkouts(
+  coachId: string,
+  workouts: AssignedWorkout[],
+  syncState: LocalSyncState = 'synced'
+) {
+  await withSerializedLocalWrite('upsertLocalAssignedWorkouts', async () => {
+    const db = await getLocalDatabase();
+
+    await db.withTransactionAsync(async () => {
+      for (const workout of workouts) {
+        const row = toAssignedWorkoutRow(coachId, workout, syncState);
+        await db.runAsync(
+          `
+            INSERT INTO local_assigned_workouts (
+              id, coach_id, pitcher_id, assigned_by_user_id, planned_date, title, focus,
+              target_pitch_count, intensity, pitch_mix_json, work_blocks_json, coach_notes,
+              status, viewed_at, completed_at, pitcher_feedback, completed_throwing_event_id,
+              created_at, updated_at, sync_state
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              coach_id = excluded.coach_id,
+              pitcher_id = excluded.pitcher_id,
+              assigned_by_user_id = excluded.assigned_by_user_id,
+              planned_date = excluded.planned_date,
+              title = excluded.title,
+              focus = excluded.focus,
+              target_pitch_count = excluded.target_pitch_count,
+              intensity = excluded.intensity,
+              pitch_mix_json = excluded.pitch_mix_json,
+              work_blocks_json = excluded.work_blocks_json,
+              coach_notes = excluded.coach_notes,
+              status = excluded.status,
+              viewed_at = excluded.viewed_at,
+              completed_at = excluded.completed_at,
+              pitcher_feedback = excluded.pitcher_feedback,
+              completed_throwing_event_id = excluded.completed_throwing_event_id,
+              created_at = excluded.created_at,
+              updated_at = excluded.updated_at,
+              sync_state = excluded.sync_state
+          `,
+          row.id,
+          row.coach_id,
+          row.pitcher_id,
+          row.assigned_by_user_id,
+          row.planned_date,
+          row.title,
+          row.focus,
+          row.target_pitch_count,
+          row.intensity,
+          row.pitch_mix_json,
+          row.work_blocks_json,
+          row.coach_notes,
+          row.status,
+          row.viewed_at,
+          row.completed_at,
+          row.pitcher_feedback,
+          row.completed_throwing_event_id,
+          row.created_at,
+          row.updated_at,
+          row.sync_state
+        );
+      }
+    });
+  });
+}
+
+/** Upserts a single assigned workout into the local cache. */
+export async function upsertLocalAssignedWorkout(
+  coachId: string,
+  workout: AssignedWorkout,
+  syncState: LocalSyncState = 'synced'
+) {
+  await upsertLocalAssignedWorkouts(coachId, [workout], syncState);
+}
+
+/** Updates the sync marker for one cached assigned workout. */
+export async function updateLocalAssignedWorkoutSyncState(
+  workoutId: string,
+  syncState: LocalSyncState
+) {
+  await withSerializedLocalWrite('updateLocalAssignedWorkoutSyncState', async () => {
+    const db = await getLocalDatabase();
+    await db.runAsync(
+      `UPDATE local_assigned_workouts SET sync_state = ? WHERE id = ?`,
+      syncState,
+      workoutId
+    );
+  });
+}
+
 /**
  * Adds a mutation to the local sync queue.
  *
@@ -684,10 +967,12 @@ export async function clearLocalOfflineData() {
 
     await db.withTransactionAsync(async () => {
       await db.runAsync(`DELETE FROM local_sync_queue`);
+      await db.runAsync(`DELETE FROM local_assigned_workouts`);
       await db.runAsync(`DELETE FROM local_event_pitch_breakdown`);
       await db.runAsync(`DELETE FROM local_throwing_events`);
       await db.runAsync(`DELETE FROM local_pitcher_profiles`);
       await db.runAsync(`DELETE FROM sync_queue`);
+      await db.runAsync(`DELETE FROM cached_assigned_workouts`);
       await db.runAsync(`DELETE FROM cached_event_pitch_breakdown`);
       await db.runAsync(`DELETE FROM cached_throwing_events`);
       await db.runAsync(`DELETE FROM cached_pitcher_profiles`);

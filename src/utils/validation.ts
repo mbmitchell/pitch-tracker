@@ -22,7 +22,7 @@ export const EVENT_TYPE_VALUES: EventType[] = [
   'other',
 ];
 
-export const SOURCE_TYPE_VALUES: SourceType[] = ['coach', 'pitcher', 'import', 'system'];
+export const SOURCE_TYPE_VALUES: SourceType[] = ['coach', 'player', 'import', 'system'];
 export const INTENSITY_VALUES: Intensity[] = ['low', 'medium', 'high', 'max'];
 export const ARM_FEEL_VALUES: ArmFeel[] = ['great', 'good', 'neutral', 'sore', 'pain'];
 export const DEVELOPMENT_PHASE_VALUES: DevelopmentPhase[] = [

@@ -1,4 +1,4 @@
-import { Link } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -11,6 +11,8 @@ import { colors, spacing } from '@/utils/theme';
 
 /** Renders the Phase 1 coach sign-in flow. */
 export function SignInScreen() {
+  const router = useRouter();
+  const { inviteToken } = useLocalSearchParams<{ inviteToken?: string }>();
   const { authError, clearAuthError, isSigningIn, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,13 +32,24 @@ export function SignInScreen() {
       return;
     }
 
-    await signIn({ email, password });
+    const result = await signIn({ email, password });
+
+    if (result.success && inviteToken) {
+      router.replace({
+        pathname: '/invite/accept',
+        params: { token: inviteToken },
+      });
+    }
   }
 
   return (
     <Screen
       title="Welcome back"
-      subtitle="Coach-centered access for managing throwing workload, bullpen plans, and pitcher development."
+      subtitle={
+        inviteToken
+          ? 'Sign in to continue your Bullpen Planner invite.'
+          : 'Coach-centered access for managing throwing workload, bullpen plans, and pitcher development.'
+      }
     >
       <SectionCard title="Sign in">
         <TextField
@@ -75,7 +88,14 @@ export function SignInScreen() {
           value={password}
         />
         <View style={styles.inlineLinkRow}>
-          <Link href="/forgot-password" style={styles.inlineLink}>
+          <Link
+            href={
+              inviteToken
+                ? { pathname: '/forgot-password', params: { inviteToken } }
+                : '/forgot-password'
+            }
+            style={styles.inlineLink}
+          >
             Forgot password?
           </Link>
         </View>
@@ -96,14 +116,22 @@ export function SignInScreen() {
 
       <SectionCard title="Phase 1">
         <Text style={styles.note}>
-          Bullpen Planner v1 is coach-centered and uses Supabase email/password auth.
-          Pitcher login and role management can layer on later without changing this flow.
+          {inviteToken
+            ? 'This sign-in continues an existing player invite. After authentication, Bullpen Planner will return you to the invite flow.'
+            : 'Bullpen Planner v1 is coach-centered and uses Supabase email/password auth. Pitcher login and role management can layer on later without changing this flow.'}
         </Text>
       </SectionCard>
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Need an account?</Text>
-        <Link href="/sign-up" style={styles.link}>
+        <Link
+          href={
+            inviteToken
+              ? { pathname: '/sign-up', params: { inviteToken } }
+              : '/sign-up'
+          }
+          style={styles.link}
+        >
           Create one
         </Link>
       </View>

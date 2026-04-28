@@ -10,10 +10,23 @@ import { SectionCard } from '@/components/SectionCard';
 import { TextField } from '@/components/TextField';
 import { OptionChipGroup } from '@/features/pitchers/components/OptionChipGroup';
 import { useAuth } from '@/services/auth';
-import { createThrowingEventForCoach, PitchBreakdownInput } from '@/services/events';
-import { formatPitcherName, listPitchersForCoach } from '@/services/pitchers';
+import {
+  createThrowingEventForCoach,
+  createThrowingEventForPlayer,
+  PitchBreakdownInput,
+} from '@/services/events';
+import {
+  formatPitcherName,
+  getLinkedPitcherProfileForUser,
+  listPitchersForCoach,
+} from '@/services/pitchers';
+import {
+  completeAssignedWorkoutForPlayer,
+  getAssignedWorkoutForPlayer,
+} from '@/services/workouts';
 import {
   ArmFeel,
+  AssignedWorkout,
   BullpenFocus,
   EventType,
   Intensity,
@@ -21,10 +34,19 @@ import {
 } from '@/types/models';
 import { getTodayIsoDateString } from '@/utils/dates';
 import { colors, spacing } from '@/utils/theme';
+import {
+  formatAssignedWorkoutFocusLabel,
+  formatAssignedWorkoutStatusLabel,
+  formatDateLabel,
+  formatIntensityLabel,
+  formatPitchCountLabel,
+} from '@/utils/workload';
 import { validateThrowingEventInput } from '@/utils/validation';
 
 type NewEventScreenProps = {
   initialPitcherId?: string;
+  assignedWorkoutId?: string;
+  mode?: 'coach' | 'player';
 };
 
 type PitchBreakdownRow = {
@@ -76,11 +98,36 @@ function createBreakdownRow(): PitchBreakdownRow {
   };
 }
 
+function mapAssignedWorkoutFocusToEventBullpenFocus(
+  focus: AssignedWorkout['focus']
+): BullpenFocus | null {
+  switch (focus) {
+    case 'fastball_command':
+      return 'command';
+    case 'changeup_feel':
+    case 'breaking_ball_feel':
+      return 'secondary_pitches';
+    case 'sequence_work':
+    case 'outing_prep':
+      return 'live_execution';
+    case 'recovery_touch_and_feel':
+      return 'recovery';
+    default:
+      return null;
+  }
+}
+
 /** Renders the event-entry flow for bullpen, outing, and other throwing work. */
-export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
+export function NewEventScreen({
+  initialPitcherId,
+  assignedWorkoutId,
+  mode = 'coach',
+}: NewEventScreenProps) {
   const router = useRouter();
   const { user } = useAuth();
   const [pitchers, setPitchers] = useState<PitcherProfile[]>([]);
+  const [assignedWorkout, setAssignedWorkout] = useState<AssignedWorkout | null>(null);
+  const [pitcherFeedback, setPitcherFeedback] = useState('');
   const [isLoadingPitchers, setIsLoadingPitchers] = useState(true);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [selectedPitcherId, setSelectedPitcherId] = useState(initialPitcherId ?? '');
@@ -108,15 +155,60 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
       setLoadingError(null);
 
       try {
+        if (mode === 'player') {
+          const linkedPitcher = await getLinkedPitcherProfileForUser(user.id);
+
+          if (!linkedPitcher) {
+            setPitchers([]);
+            setSelectedPitcherId('');
+            setAssignedWorkout(null);
+            return;
+          }
+
+          let nextAssignedWorkout: AssignedWorkout | null = null;
+
+          if (assignedWorkoutId) {
+            nextAssignedWorkout = await getAssignedWorkoutForPlayer(user.id, assignedWorkoutId);
+
+            if (nextAssignedWorkout.status === 'completed') {
+              throw new Error('This assigned workout is already marked completed.');
+            }
+
+            if (nextAssignedWorkout.status === 'canceled') {
+              throw new Error('This assigned workout was canceled and can no longer be completed.');
+            }
+          }
+
+          setAssignedWorkout(nextAssignedWorkout);
+          setPitchers([linkedPitcher]);
+          setSelectedPitcherId(linkedPitcher.id);
+
+          if (nextAssignedWorkout) {
+            setDate(nextAssignedWorkout.planned_date);
+            setEventType('bullpen');
+            setTotalPitches(String(nextAssignedWorkout.target_pitch_count));
+            setIntensity(nextAssignedWorkout.intensity);
+            setBullpenFocus(mapAssignedWorkoutFocusToEventBullpenFocus(nextAssignedWorkout.focus));
+            setNotes('');
+          }
+
+          return;
+        }
+
         const data = await listPitchersForCoach(user.id);
         setPitchers(data);
+        setAssignedWorkout(null);
 
         if (!selectedPitcherId && data.length === 1) {
           setSelectedPitcherId(data[0].id);
         }
       } catch (error) {
         setLoadingError(
-          error instanceof Error ? error.message : 'Unable to load coach pitchers.'
+          error instanceof Error
+            ? error.message
+            : mode === 'player'
+              ? 'Unable to load the linked player pitcher profile.'
+              : 'Unable to load coach pitchers.'
         );
       } finally {
         setIsLoadingPitchers(false);
@@ -124,7 +216,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
     }
 
     void loadPitchers();
-  }, [refreshToken, selectedPitcherId, user?.id]);
+  }, [assignedWorkoutId, mode, refreshToken, selectedPitcherId, user?.id]);
 
   const pitcherOptions = useMemo(
     () =>
@@ -162,7 +254,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
       arm_feel: armFeel,
       bullpen_focus: bullpenFocus,
       notes,
-      source_type: 'coach',
+      source_type: mode === 'player' ? 'player' : 'coach',
       pitch_breakdown: normalizePitchBreakdownInput(),
     });
   }
@@ -184,24 +276,46 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
     setIsSubmitting(true);
 
     try {
-      await createThrowingEventForCoach(user.id, {
-        pitcher_id: selectedPitcherId,
-        date,
-        event_type: eventType,
-        total_pitches: Number(totalPitches),
-        innings_thrown: inningsThrown.trim() ? Number(inningsThrown) : null,
-        intensity,
-        arm_feel: armFeel,
-        bullpen_focus: bullpenFocus,
-        notes,
-        source_type: 'coach',
-        pitch_breakdown: normalizePitchBreakdownInput(),
-      });
+      if (mode === 'player' && assignedWorkout) {
+        await completeAssignedWorkoutForPlayer(user.id, assignedWorkout.id, {
+          pitcher_feedback: pitcherFeedback,
+          date,
+          event_type: eventType,
+          total_pitches: Number(totalPitches),
+          innings_thrown: inningsThrown.trim() ? Number(inningsThrown) : null,
+          intensity,
+          arm_feel: armFeel,
+          bullpen_focus: bullpenFocus,
+          notes,
+          pitch_breakdown: normalizePitchBreakdownInput(),
+        });
+      } else {
+        const createEvent =
+          mode === 'player' ? createThrowingEventForPlayer : createThrowingEventForCoach;
 
-      router.replace({
-        pathname: '/pitchers/[id]',
-        params: { id: selectedPitcherId },
-      });
+        await createEvent(user.id, {
+          pitcher_id: selectedPitcherId,
+          date,
+          event_type: eventType,
+          total_pitches: Number(totalPitches),
+          innings_thrown: inningsThrown.trim() ? Number(inningsThrown) : null,
+          intensity,
+          arm_feel: armFeel,
+          bullpen_focus: bullpenFocus,
+          notes,
+          source_type: mode === 'player' ? 'player' : 'coach',
+          pitch_breakdown: normalizePitchBreakdownInput(),
+        });
+      }
+
+      if (mode === 'player') {
+        router.replace('/player');
+      } else {
+        router.replace({
+          pathname: '/pitchers/[id]',
+          params: { id: selectedPitcherId },
+        });
+      }
     } catch (nextError) {
       setSubmitError(
         nextError instanceof Error ? nextError.message : 'Unable to save throwing event.'
@@ -215,7 +329,11 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
     return (
       <FullScreenLoader
         title="Loading pitchers"
-        subtitle="Getting the coach roster ready for event entry."
+        subtitle={
+          mode === 'player'
+            ? 'Loading your linked pitcher profile for completed-work entry.'
+            : 'Getting the coach roster ready for event entry.'
+        }
       />
     );
   }
@@ -239,7 +357,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
           />
           <PrimaryButton
             label="Back to dashboard"
-            onPress={() => router.replace('/')}
+            onPress={() => router.replace(mode === 'player' ? '/player' : '/')}
           />
         </SectionCard>
       </Screen>
@@ -249,15 +367,25 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
   if (!pitchers.length) {
     return (
       <Screen
-        title="No pitchers yet"
-        subtitle="Create a pitcher profile before logging throwing workload."
+        title={mode === 'player' ? 'Player setup needed' : 'No pitchers yet'}
+        subtitle={
+          mode === 'player'
+            ? 'Finish player setup before logging completed throwing work.'
+            : 'Create a pitcher profile before logging throwing workload.'
+        }
       >
         <SectionCard title="Roster">
           <Text style={styles.copy}>
-            Events belong to pitcher profiles, so Bullpen Planner needs at least one
-            pitcher on the roster before you can save a throwing event.
+            {mode === 'player'
+              ? 'Completed work belongs to the linked pitcher profile, so this account needs a linked pitcher before you can save an event.'
+              : 'Events belong to pitcher profiles, so Bullpen Planner needs at least one pitcher on the roster before you can save a throwing event.'}
           </Text>
-          <PrimaryButton label="Add pitcher" onPress={() => router.replace('/pitchers/new')} />
+          <PrimaryButton
+            label={mode === 'player' ? 'Go to player setup' : 'Add pitcher'}
+            onPress={() =>
+              router.replace(mode === 'player' ? '/player/onboarding' : '/pitchers/new')
+            }
+          />
         </SectionCard>
       </Screen>
     );
@@ -265,19 +393,61 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
 
   return (
     <Screen
-      title="Add throwing event"
-      subtitle="Log workload for bullpens, outings, flat grounds, long toss, recovery throws, and more."
+      title={
+        mode === 'player'
+          ? assignedWorkout
+            ? 'Complete assigned workout'
+            : 'Log completed work'
+          : 'Add throwing event'
+      }
+      subtitle={
+        mode === 'player'
+          ? assignedWorkout
+            ? 'Complete the assigned workout and record the work you actually threw.'
+            : 'Record the work you completed so your recommendation and workload history stay current.'
+          : 'Log workload for bullpens, outings, flat grounds, long toss, recovery throws, and more.'
+      }
     >
+      {assignedWorkout ? (
+        <SectionCard title="Assigned workout">
+          <Text style={styles.assignmentTitle}>{assignedWorkout.title}</Text>
+          <Text style={styles.copy}>
+            Planned date: {formatDateLabel(assignedWorkout.planned_date)} • Status:{' '}
+            {formatAssignedWorkoutStatusLabel(assignedWorkout.status)}
+          </Text>
+          <Text style={styles.copy}>
+            Focus: {formatAssignedWorkoutFocusLabel(assignedWorkout.focus)} • Intensity:{' '}
+            {formatIntensityLabel(assignedWorkout.intensity)}
+          </Text>
+          <Text style={styles.copy}>
+            Target: {formatPitchCountLabel(assignedWorkout.target_pitch_count)}
+          </Text>
+          <Text style={styles.copy}>Source: Coach assigned</Text>
+          {assignedWorkout.coach_notes ? (
+            <Text style={styles.copy}>Coach notes: {assignedWorkout.coach_notes}</Text>
+          ) : null}
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Event details">
-        <OptionChipGroup
-          label="Pitcher"
-          onChange={(value) => {
-            setSelectedPitcherId(value as string);
-            setValidationError(null);
-          }}
-          options={pitcherOptions}
-          selectedValue={selectedPitcherId}
-        />
+        {mode === 'coach' ? (
+          <OptionChipGroup
+            label="Pitcher"
+            onChange={(value) => {
+              setSelectedPitcherId(value as string);
+              setValidationError(null);
+            }}
+            options={pitcherOptions}
+            selectedValue={selectedPitcherId}
+          />
+        ) : (
+          <View style={styles.sourceRow}>
+            <Text style={styles.sourceLabel}>Pitcher</Text>
+            <Text style={styles.sourceValue}>
+              {pitchers[0] ? formatPitcherName(pitchers[0]) : 'Linked profile'}
+            </Text>
+          </View>
+        )}
 
         <DatePickerField
           helperText="Stored as YYYY-MM-DD internally and shown in MM/DD/YYYY for coaches."
@@ -388,9 +558,21 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
           value={notes}
         />
 
+        {assignedWorkout ? (
+          <TextField
+            label="Pitcher feedback"
+            multiline
+            numberOfLines={4}
+            onChangeText={setPitcherFeedback}
+            placeholder="How did the workout feel? What went well? Any recovery or arm-care notes for the coach?"
+            style={styles.feedbackArea}
+            value={pitcherFeedback}
+          />
+        ) : null}
+
         <View style={styles.sourceRow}>
           <Text style={styles.sourceLabel}>Source type</Text>
-          <Text style={styles.sourceValue}>coach</Text>
+          <Text style={styles.sourceValue}>{mode === 'player' ? 'player' : 'coach'}</Text>
         </View>
       </SectionCard>
 
@@ -466,7 +648,7 @@ export function NewEventScreen({ initialPitcherId }: NewEventScreenProps) {
 
       <PrimaryButton
         disabled={isSubmitting}
-        label="Save throwing event"
+        label={assignedWorkout ? 'Complete workout' : 'Save throwing event'}
         loading={isSubmitting}
         onPress={() => {
           void handleSubmit();
@@ -489,6 +671,11 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     textAlignVertical: 'top',
   },
+  feedbackArea: {
+    minHeight: 96,
+    paddingTop: 14,
+    textAlignVertical: 'top',
+  },
   sourceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -504,6 +691,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
     fontWeight: '700',
+  },
+  assignmentTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
   },
   copy: {
     color: colors.muted,

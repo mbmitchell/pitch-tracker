@@ -8,6 +8,7 @@ import {
   formatEventTypeLabel,
   formatPitchCountLabel,
   formatReadinessLabel,
+  formatSourceTypeLabel,
 } from '@/utils/workload';
 
 type PitcherStaffOverviewRowProps = {
@@ -81,6 +82,7 @@ export function PitcherStaffOverviewRow({
       <Text style={styles.meta}>
         Last event:{' '}
         {item.lastEventType ? formatEventTypeLabel(item.lastEventType) : 'No events yet'}
+        {item.lastSourceType ? ` • ${formatSourceTypeLabel(item.lastSourceType)}` : ''}
       </Text>
     </Pressable>
   );

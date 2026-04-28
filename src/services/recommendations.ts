@@ -48,6 +48,9 @@ export type BullpenRecommendationInput = {
   days_since_last_outing: number | null;
   days_since_last_high_intensity_event: number | null;
   recent_total_workload: number;
+  last_throwing_event_type: EventType | null;
+  last_throwing_event_pitch_count: number | null;
+  last_throwing_event_intensity: Intensity | null;
   last_outing_type: EventType | null;
   last_outing_pitch_count: number | null;
   bullpen_focus: RecommendationBullpenFocus;
@@ -70,8 +73,14 @@ export type BullpenRecommendationWorkBlock = {
 };
 
 export type BullpenRecommendationMetadata = {
+  plan_state: 'normal' | 'same_day_recovery';
   about_model_note: string;
   supporting_sources: string[];
+  same_day_throwing_summary: {
+    event_type: EventType | null;
+    total_pitches: number | null;
+    intensity: Intensity | null;
+  } | null;
 };
 
 export type BullpenRecommendationOutput = {
@@ -84,6 +93,11 @@ export type BullpenRecommendationOutput = {
   caution_notes: string[];
   applied_rules: string[];
   metadata: BullpenRecommendationMetadata;
+};
+
+export type AssignedWorkoutPlanDetails = {
+  pitch_mix: BullpenRecommendationPitchMixItem[];
+  work_blocks: BullpenRecommendationWorkBlock[];
 };
 
 type PhaseModifier = {
@@ -682,6 +696,9 @@ export function buildBullpenRecommendationInput(
     days_since_last_outing: lastOuting ? calculateDaysSince(lastOuting.date) : null,
     days_since_last_high_intensity_event: getDaysSinceLastHighIntensityEvent(events),
     recent_total_workload: recentTotalWorkload,
+    last_throwing_event_type: events[0]?.event_type ?? null,
+    last_throwing_event_pitch_count: events[0]?.total_pitches ?? null,
+    last_throwing_event_intensity: events[0]?.intensity ?? null,
     last_outing_type: lastOutingType,
     last_outing_pitch_count: lastOuting?.total_pitches ?? null,
     bullpen_focus: mapBullpenFocus(
@@ -1094,6 +1111,82 @@ function buildWorkBlocks(
 }
 
 /**
+ * Builds stored workout structure from a target pitch count, focus, and arsenal.
+ *
+ * Coach-assigned workouts reuse the same deterministic pitch-mix and work-block
+ * logic as live recommendations so saved assignments stay aligned with the model.
+ *
+ * @param totalPitches - assigned target pitch count
+ * @param focus - workout focus the coach selected
+ * @param pitchArsenal - available pitches from the pitcher profile
+ * @returns workout pitch mix and work blocks ready for persistence
+ */
+export function buildAssignedWorkoutPlanDetails(
+  totalPitches: number,
+  focus: RecommendationBullpenFocus,
+  pitchArsenal: string[]
+): AssignedWorkoutPlanDetails {
+  return {
+    pitch_mix: buildPitchMixRecommendation(totalPitches, focus, pitchArsenal).items,
+    work_blocks: buildWorkBlocks(totalPitches, focus),
+  };
+}
+
+function buildSameDayRecoveryWorkBlocks(): BullpenRecommendationWorkBlock[] {
+  return [
+    {
+      label: 'Recovery',
+      target_pitches: 0,
+      intent: 'Skip additional throwing and focus on hydration, soft-tissue recovery, and general reset work.',
+    },
+    {
+      label: 'Mobility',
+      target_pitches: 0,
+      intent: 'Use light shoulder, thoracic, and hip mobility work to help the body recover from the session already logged today.',
+    },
+    {
+      label: 'Arm care',
+      target_pitches: 0,
+      intent: 'Complete the usual post-throw arm-care routine and stop if the arm feels worse instead of better.',
+    },
+  ];
+}
+
+function buildSameDayRecoveryRecommendation(
+  input: BullpenRecommendationInput
+): BullpenRecommendationOutput {
+  return {
+    input_snapshot: input,
+    recommended_total_pitch_count: 0,
+    recommended_intensity: 'low',
+    recommended_pitch_mix: [],
+    recommended_work_blocks: buildSameDayRecoveryWorkBlocks(),
+    coaching_notes: [
+      'You have already logged a throwing session today.',
+      'No additional throwing recommended today.',
+      'Suggested focus: recovery, mobility, and arm care.',
+    ],
+    caution_notes: [
+      'Same-day workload is already on the board, so today should shift from build-up into recovery-focused work.',
+    ],
+    applied_rules: [
+      'same_day_throwing_detected',
+      'A throwing event is already logged for today, so the normal bullpen build was replaced with a recovery-only plan.',
+    ],
+    metadata: {
+      plan_state: 'same_day_recovery',
+      about_model_note: RECOMMENDATION_ABOUT_MODEL_NOTE,
+      supporting_sources: RECOMMENDATION_SUPPORTING_SOURCES,
+      same_day_throwing_summary: {
+        event_type: input.last_throwing_event_type,
+        total_pitches: input.last_throwing_event_pitch_count,
+        intensity: input.last_throwing_event_intensity,
+      },
+    },
+  };
+}
+
+/**
  * Generates a deterministic bullpen recommendation from workload, phase, and arm-feel inputs.
  *
  * The engine starts from guarded age-group defaults, then layers phase adjustments,
@@ -1106,6 +1199,10 @@ function buildWorkBlocks(
 export function generateBullpenRecommendation(
   input: BullpenRecommendationInput
 ): BullpenRecommendationOutput {
+  if (input.days_since_last_throwing_event === 0) {
+    return buildSameDayRecoveryRecommendation(input);
+  }
+
   const ageDefaults = PITCH_SMART_AGE_GROUP_DEFAULTS[input.age_group];
   const baselineSpan = getBaselineRangeSpan(ageDefaults);
   const phaseStart = getPhaseAdjustedStartingPoint(
@@ -1375,8 +1472,10 @@ export function generateBullpenRecommendation(
     caution_notes: cautionNotes,
     applied_rules: appliedRules,
     metadata: {
+      plan_state: 'normal',
       about_model_note: RECOMMENDATION_ABOUT_MODEL_NOTE,
       supporting_sources: RECOMMENDATION_SUPPORTING_SOURCES,
+      same_day_throwing_summary: null,
     },
   };
 }

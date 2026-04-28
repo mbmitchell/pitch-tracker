@@ -8,6 +8,7 @@ export type PitcherStaffOverview = {
   pitcher: PitcherProfile;
   lastThrowingDate: ThrowingEvent['date'] | null;
   lastEventType: ThrowingEvent['event_type'] | null;
+  lastSourceType: ThrowingEvent['source_type'] | null;
   recentPitchCount: number;
   readiness: ReadinessStatus;
 };
@@ -158,6 +159,7 @@ export function buildPitcherStaffOverview(
       pitcher,
       lastThrowingDate: lastEvent?.date ?? null,
       lastEventType: lastEvent?.event_type ?? null,
+      lastSourceType: lastEvent?.source_type ?? null,
       recentPitchCount: getRecentPitchCount(pitcherEvents.slice(0, 3)),
       readiness: deriveReadinessStatus(pitcherEvents),
     };

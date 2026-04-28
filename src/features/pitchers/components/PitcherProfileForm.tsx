@@ -58,6 +58,7 @@ type PitcherProfileFormProps = {
   initialPitcher?: PitcherProfile | null;
   submitError?: string | null;
   isSubmitting?: boolean;
+  submitLabel?: string;
   onSubmit: (input: PitcherProfileInput) => Promise<void> | void;
 };
 
@@ -120,6 +121,7 @@ export function PitcherProfileForm({
   isSubmitting = false,
   mode,
   onSubmit,
+  submitLabel,
   submitError,
 }: PitcherProfileFormProps) {
   const [values, setValues] = useState<PitcherProfileFormValues>(
@@ -317,7 +319,7 @@ export function PitcherProfileForm({
 
       <PrimaryButton
         disabled={isSubmitting}
-        label={mode === 'create' ? 'Save pitcher' : 'Save changes'}
+        label={submitLabel ?? (mode === 'create' ? 'Save pitcher' : 'Save changes')}
         loading={isSubmitting}
         onPress={() => {
           void handleSubmit();

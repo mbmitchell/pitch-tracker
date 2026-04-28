@@ -9,16 +9,20 @@ import {
   LocalSyncState,
   listLocalSyncQueueEntries,
   resetLocalOfflineData,
+  updateLocalAssignedWorkoutSyncState,
   updateLocalPitchBreakdownSyncState,
   updateLocalPitcherSyncState,
   updateLocalSyncQueueEntry,
   updateLocalThrowingEventSyncState,
+  upsertLocalAssignedWorkout,
   upsertLocalPitchBreakdownRows,
   upsertLocalPitcher,
   upsertLocalThrowingEvent,
 } from '@/services/localData';
 import { useAuth } from '@/services/auth';
 import {
+  AssignedWorkout,
+  AssignedWorkoutUpdate,
   EventPitchBreakdown,
   EventPitchBreakdownInsert,
   PitcherProfile,
@@ -29,7 +33,11 @@ import {
 } from '@/types/models';
 
 export type SyncQueueDisplayItem = LocalQueueEntry & {
-  entity_type: 'pitcher_profile' | 'throwing_event' | 'event_pitch_breakdown';
+  entity_type:
+    | 'pitcher_profile'
+    | 'throwing_event'
+    | 'event_pitch_breakdown'
+    | 'assigned_workout';
 };
 
 type SyncIndicatorState = {
@@ -100,6 +108,8 @@ export function getSyncEntityType(
       return 'pitcher_profile';
     case 'create_throwing_event':
       return 'throwing_event';
+    case 'update_assigned_workout':
+      return 'assigned_workout';
     default:
       return 'event_pitch_breakdown';
   }
@@ -198,6 +208,25 @@ async function syncCreatePitchBreakdown(coachId: string, queueEntry: LocalQueueE
   await updateLocalPitchBreakdownSyncState(queueEntry.entity_id, 'synced');
 }
 
+async function syncUpdateAssignedWorkout(coachId: string, queueEntry: LocalQueueEntry) {
+  const supabaseClient = getSupabaseClient();
+  const payload = JSON.parse(queueEntry.payload_json) as AssignedWorkoutUpdate & { id: string };
+
+  const { data, error } = await supabaseClient
+    .from('assigned_workouts')
+    .update(payload)
+    .eq('id', payload.id)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await upsertLocalAssignedWorkout(coachId, data as AssignedWorkout, 'synced');
+  await updateLocalAssignedWorkoutSyncState(queueEntry.entity_id, 'synced');
+}
+
 async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
   await updateLocalSyncQueueEntry(queueEntry.id, 'syncing', null, queueEntry.retry_count);
   notifySyncListeners();
@@ -214,6 +243,9 @@ async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
       break;
     case 'create_pitch_breakdown':
       await syncCreatePitchBreakdown(coachId, queueEntry);
+      break;
+    case 'update_assigned_workout':
+      await syncUpdateAssignedWorkout(coachId, queueEntry);
       break;
     default:
       throw new Error(`Unsupported sync mutation: ${queueEntry.mutation_type}`);

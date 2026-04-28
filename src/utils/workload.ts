@@ -2,7 +2,7 @@ import { EventType, ThrowingEvent } from '@/types/models';
 
 import { isBullpenEvent, isOutingEvent, ThrowingEventRecord } from '@/services/events';
 import { ReadinessStatus } from '@/features/dashboard/utils/staffOverview';
-import { formatIsoDateForDisplay, isoDateStringToDate } from '@/utils/dates';
+import { formatIsoDateForDisplay, isoDateStringToDate, isIsoDateString } from '@/utils/dates';
 
 export type WorkloadSummary = {
   lastBullpen: ThrowingEventRecord | null;
@@ -70,6 +70,63 @@ export function formatEventTypeLabel(eventType: EventType) {
 }
 
 /**
+ * Formats event source types so coach-entered and player-entered work are easy to distinguish.
+ *
+ * @param sourceType - stored source type value
+ * @returns display label for history and overview surfaces
+ */
+export function formatSourceTypeLabel(sourceType: ThrowingEvent['source_type']) {
+  switch (sourceType) {
+    case 'player':
+      return 'Player logged';
+    case 'coach':
+      return 'Coach logged';
+    case 'system':
+      return 'System entry';
+    case 'import':
+      return 'Imported';
+    default:
+      return 'Entry';
+  }
+}
+
+/**
+ * Formats invite status values for coach-facing invite management UI.
+ *
+ * @param status - stored invite lifecycle status
+ * @returns display label
+ */
+export function formatInviteStatusLabel(status: string) {
+  return formatValueLabel(status);
+}
+
+/**
+ * Formats a stored timestamp for compact coach-facing UI copy.
+ *
+ * @param value - ISO timestamp or date value
+ * @returns formatted US date/time label
+ */
+export function formatTimestampLabel(value: string) {
+  if (isIsoDateString(value)) {
+    return formatIsoDateForDisplay(value);
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
+/**
  * Formats readiness status for dashboard badges and drill-down screens.
  *
  * @param readiness - derived readiness state
@@ -94,6 +151,39 @@ export function formatReadinessLabel(readiness: ReadinessStatus) {
  */
 export function formatBullpenFocusLabel(value: string | null) {
   return value ? formatValueLabel(value) : 'Not set';
+}
+
+/**
+ * Formats assigned-workout focus values derived from recommendation focus presets.
+ *
+ * @param value - stored assigned-workout focus value
+ * @returns display label or fallback text
+ */
+export function formatAssignedWorkoutFocusLabel(value: string | null) {
+  return value ? formatValueLabel(value) : 'Not set';
+}
+
+/**
+ * Formats assigned workout statuses with explicit coach/player wording.
+ *
+ * @param value - stored assigned-workout status
+ * @returns display label used across coach and player workout UI
+ */
+export function formatAssignedWorkoutStatusLabel(value: string) {
+  switch (value) {
+    case 'assigned':
+      return 'Assigned';
+    case 'viewed':
+      return 'Viewed';
+    case 'completed':
+      return 'Completed';
+    case 'skipped':
+      return 'Skipped';
+    case 'canceled':
+      return 'Canceled';
+    default:
+      return formatValueLabel(value);
+  }
 }
 
 /**

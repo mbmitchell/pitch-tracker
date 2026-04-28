@@ -139,6 +139,57 @@ async function applyOfflineSchema(db: SQLiteDatabase) {
     );`,
     `CREATE INDEX IF NOT EXISTS idx_local_event_pitch_breakdown_event
       ON local_event_pitch_breakdown (event_id);`,
+    `CREATE TABLE IF NOT EXISTS cached_assigned_workouts (
+      id TEXT PRIMARY KEY NOT NULL,
+      coach_id TEXT NOT NULL,
+      pitcher_id TEXT NOT NULL,
+      assigned_by_user_id TEXT NOT NULL,
+      planned_date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      focus TEXT NOT NULL,
+      target_pitch_count INTEGER NOT NULL,
+      intensity TEXT NOT NULL,
+      pitch_mix_json TEXT NOT NULL,
+      work_blocks_json TEXT NOT NULL,
+      coach_notes TEXT,
+      status TEXT NOT NULL,
+      viewed_at TEXT,
+      completed_at TEXT,
+      pitcher_feedback TEXT,
+      completed_throwing_event_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_cached_assigned_workouts_owner_date
+      ON cached_assigned_workouts (coach_id, planned_date ASC, created_at DESC);`,
+    `CREATE INDEX IF NOT EXISTS idx_cached_assigned_workouts_pitcher
+      ON cached_assigned_workouts (pitcher_id, planned_date ASC, created_at DESC);`,
+    `CREATE TABLE IF NOT EXISTS local_assigned_workouts (
+      id TEXT PRIMARY KEY NOT NULL,
+      coach_id TEXT NOT NULL,
+      pitcher_id TEXT NOT NULL,
+      assigned_by_user_id TEXT NOT NULL,
+      planned_date TEXT NOT NULL,
+      title TEXT NOT NULL,
+      focus TEXT NOT NULL,
+      target_pitch_count INTEGER NOT NULL,
+      intensity TEXT NOT NULL,
+      pitch_mix_json TEXT NOT NULL,
+      work_blocks_json TEXT NOT NULL,
+      coach_notes TEXT,
+      status TEXT NOT NULL,
+      viewed_at TEXT,
+      completed_at TEXT,
+      pitcher_feedback TEXT,
+      completed_throwing_event_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      sync_state TEXT NOT NULL DEFAULT 'synced'
+    );`,
+    `CREATE INDEX IF NOT EXISTS idx_local_assigned_workouts_owner_date
+      ON local_assigned_workouts (coach_id, planned_date ASC, created_at DESC);`,
+    `CREATE INDEX IF NOT EXISTS idx_local_assigned_workouts_pitcher
+      ON local_assigned_workouts (pitcher_id, planned_date ASC, created_at DESC);`,
     `CREATE TABLE IF NOT EXISTS local_sync_queue (
       id TEXT PRIMARY KEY NOT NULL,
       coach_id TEXT NOT NULL,

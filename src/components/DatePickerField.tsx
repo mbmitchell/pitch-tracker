@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker, {
-  DateTimePickerChangeEvent,
+  DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 
 import {
@@ -65,7 +65,7 @@ export function DatePickerField({
   }
 
   function handleValueChange(
-    event: DateTimePickerChangeEvent,
+    event: DateTimePickerEvent,
     nextValue?: Date | string | null
   ) {
     const nextDate =

@@ -34,6 +34,8 @@ function formatMutationTypeLabel(value: SyncQueueDisplayItem['mutation_type']) {
       return 'Update pitcher';
     case 'create_throwing_event':
       return 'Create throwing event';
+    case 'update_assigned_workout':
+      return 'Update assigned workout';
     default:
       return 'Create pitch breakdown row';
   }
@@ -45,6 +47,8 @@ function formatEntityTypeLabel(value: SyncQueueDisplayItem['entity_type']) {
       return 'Pitcher profile';
     case 'throwing_event':
       return 'Throwing event';
+    case 'assigned_workout':
+      return 'Assigned workout';
     default:
       return 'Pitch breakdown';
   }

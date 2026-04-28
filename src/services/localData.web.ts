@@ -1,4 +1,5 @@
 import {
+  AssignedWorkout,
   EventPitchBreakdown,
   PitcherProfile,
   ThrowingEvent,
@@ -11,7 +12,8 @@ export type LocalQueueMutationType =
   | 'create_pitcher'
   | 'update_pitcher'
   | 'create_throwing_event'
-  | 'create_pitch_breakdown';
+  | 'create_pitch_breakdown'
+  | 'update_assigned_workout';
 
 export type LocalQueueEntry = {
   id: string;
@@ -32,6 +34,8 @@ const events = new Map<string, ThrowingEvent>();
 const eventCoachIds = new Map<string, string>();
 const breakdownRows = new Map<string, EventPitchBreakdown>();
 const breakdownCoachIds = new Map<string, string>();
+const workouts = new Map<string, AssignedWorkout & { sync_state?: LocalSyncState }>();
+const workoutCoachIds = new Map<string, string>();
 const queue = new Map<string, LocalQueueEntry>();
 
 /** Generates a UUID v4 for offline-created records in the web shim. */
@@ -176,6 +180,85 @@ export async function updateLocalPitchBreakdownSyncState(
   _syncState: LocalSyncState
 ) {}
 
+/** Lists cached assigned workouts in the web fallback store. */
+export async function listLocalAssignedWorkouts(coachId: string, pitcherId?: string) {
+  return Array.from(workouts.values())
+    .filter(
+      (workout) =>
+        workoutCoachIds.get(workout.id) === coachId &&
+        (!pitcherId || workout.pitcher_id === pitcherId)
+    )
+    .sort((left, right) => {
+      const dateCompare = left.planned_date.localeCompare(right.planned_date);
+
+      if (dateCompare !== 0) {
+        return dateCompare;
+      }
+
+      return right.created_at.localeCompare(left.created_at);
+    });
+}
+
+/** Loads one cached assigned workout in the web fallback store. */
+export async function getLocalAssignedWorkoutById(coachId: string, workoutId: string) {
+  const workout = workouts.get(workoutId);
+  return workout && workoutCoachIds.get(workoutId) === coachId ? workout : null;
+}
+
+/** Replaces cached assigned workouts for one pitcher in the web fallback store. */
+export async function replaceLocalAssignedWorkoutsForPitcher(
+  coachId: string,
+  pitcherId: string,
+  nextWorkouts: AssignedWorkout[],
+  syncState: LocalSyncState = 'synced'
+) {
+  Array.from(workouts.values())
+    .filter(
+      (workout) => workoutCoachIds.get(workout.id) === coachId && workout.pitcher_id === pitcherId
+    )
+    .forEach((workout) => {
+      workouts.delete(workout.id);
+      workoutCoachIds.delete(workout.id);
+    });
+
+  await upsertLocalAssignedWorkouts(coachId, nextWorkouts, syncState);
+}
+
+/** Upserts assigned workouts into the web fallback store. */
+export async function upsertLocalAssignedWorkouts(
+  coachId: string,
+  nextWorkouts: AssignedWorkout[],
+  syncState: LocalSyncState = 'synced'
+) {
+  nextWorkouts.forEach((workout) => {
+    workouts.set(workout.id, { ...workout, sync_state: syncState });
+    workoutCoachIds.set(workout.id, coachId);
+  });
+}
+
+/** Upserts one assigned workout into the web fallback store. */
+export async function upsertLocalAssignedWorkout(
+  coachId: string,
+  workout: AssignedWorkout,
+  syncState: LocalSyncState = 'synced'
+) {
+  await upsertLocalAssignedWorkouts(coachId, [workout], syncState);
+}
+
+/** Updates the sync-state marker for one cached workout in the web fallback store. */
+export async function updateLocalAssignedWorkoutSyncState(
+  workoutId: string,
+  syncState: LocalSyncState
+) {
+  const workout = workouts.get(workoutId);
+
+  if (!workout) {
+    return;
+  }
+
+  workouts.set(workoutId, { ...workout, sync_state: syncState });
+}
+
 /** Adds a mutation to the in-memory web fallback queue. */
 export async function enqueueLocalSyncMutation(
   entry: Omit<LocalQueueEntry, 'retry_count' | 'last_error'>
@@ -236,6 +319,8 @@ export async function clearLocalOfflineData() {
   eventCoachIds.clear();
   breakdownRows.clear();
   breakdownCoachIds.clear();
+  workouts.clear();
+  workoutCoachIds.clear();
   queue.clear();
 }
 
