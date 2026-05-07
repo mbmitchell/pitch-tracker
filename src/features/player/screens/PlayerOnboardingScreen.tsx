@@ -166,7 +166,7 @@ export function PlayerOnboardingScreen() {
       contentContainerStyle={{ paddingBottom: 48 }}
       keyboardAware
       keyboardVerticalOffset={headerHeight}
-      subtitle="Create your pitcher profile so Bullpen Planner can show your own recommendation and workload history."
+      subtitle="Create your pitcher profile so PitchReady can show your own recommendation and workload history."
       title="Player setup"
     >
       {isLoadingInvites ? (

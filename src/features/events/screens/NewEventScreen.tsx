@@ -378,7 +378,7 @@ export function NewEventScreen({
           <Text style={styles.copy}>
             {mode === 'player'
               ? 'Completed work belongs to the linked pitcher profile, so this account needs a linked pitcher before you can save an event.'
-              : 'Events belong to pitcher profiles, so Bullpen Planner needs at least one pitcher on the roster before you can save a throwing event.'}
+              : 'Events belong to pitcher profiles, so PitchReady needs at least one pitcher on the roster before you can save a throwing event.'}
           </Text>
           <PrimaryButton
             label={mode === 'player' ? 'Go to player setup' : 'Add pitcher'}

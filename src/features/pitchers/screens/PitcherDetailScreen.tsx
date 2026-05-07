@@ -610,7 +610,7 @@ export function PitcherDetailScreen({ pitcherId }: PitcherDetailScreenProps) {
             <View style={styles.subsection}>
               <Text style={styles.subsectionTitle}>Manual link for existing account</Text>
               <Text style={styles.copy}>
-                Link this pitcher profile directly when the player already has a Bullpen Planner
+                Link this pitcher profile directly when the player already has a PitchReady
                 account.
               </Text>
               {!showLinkAccountForm ? (

@@ -42,3 +42,9 @@ app-example
 /ios
 /android
 .env
+
+.env
+.env.production
+.env.dev.backup
+.env.*
+!.env.example

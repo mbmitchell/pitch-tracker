@@ -44,7 +44,7 @@ export function ForgotPasswordScreen() {
   return (
     <Screen
       title="Reset password"
-      subtitle="Request a password reset email for your Bullpen Planner coach account."
+      subtitle="Request a password reset email for your PitchReady coach account."
     >
       <SectionCard title="Forgot password">
         <TextField

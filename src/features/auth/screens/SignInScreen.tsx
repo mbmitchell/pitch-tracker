@@ -47,7 +47,7 @@ export function SignInScreen() {
       title="Welcome back"
       subtitle={
         inviteToken
-          ? 'Sign in to continue your Bullpen Planner invite.'
+          ? 'Sign in to continue your PitchReady invite.'
           : 'Coach-centered access for managing throwing workload, bullpen plans, and pitcher development.'
       }
     >
@@ -117,8 +117,8 @@ export function SignInScreen() {
       <SectionCard title="Phase 1">
         <Text style={styles.note}>
           {inviteToken
-            ? 'This sign-in continues an existing player invite. After authentication, Bullpen Planner will return you to the invite flow.'
-            : 'Bullpen Planner v1 is coach-centered and uses Supabase email/password auth. Pitcher login and role management can layer on later without changing this flow.'}
+            ? 'This sign-in continues an existing player invite. After authentication, PitchReady will return you to the invite flow.'
+            : 'PitchReady v1 is coach-centered and uses Supabase email/password auth. Pitcher login and role management can layer on later without changing this flow.'}
         </Text>
       </SectionCard>
 

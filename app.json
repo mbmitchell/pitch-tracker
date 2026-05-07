@@ -1,14 +1,18 @@
 {
   "expo": {
-    "name": "Bullpen Planner",
+    "name": "PitchReady",
     "slug": "bullpen-planner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "bullpenplanner",
+    "scheme": "pitchready",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "bundleIdentifier": "com.aeriesolutions.pitchready",
+      "icon": "./assets/images/icon.png",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -43,6 +47,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6207851d-f8c4-413e-a8bb-1175e70a8ae3"
+      }
+    },
+    "owner": "pitchready"
   }
 }

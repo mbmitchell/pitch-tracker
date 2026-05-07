@@ -111,7 +111,7 @@ function RootNavigator() {
         <StatusBar style="dark" />
         <FullScreenLoader
           title="Loading session"
-          subtitle="Checking your Bullpen Planner account access."
+          subtitle="Checking your PitchReady account access."
         />
       </>
     );

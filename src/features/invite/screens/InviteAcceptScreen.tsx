@@ -41,7 +41,7 @@ function getInviteTitle(status: PitcherProfileInviteValidationResult['status']) 
 function getInviteMessage(result: PitcherProfileInviteValidationResult, signedInEmail: string | null) {
   switch (result.status) {
     case 'expired':
-      return 'This invite has expired. Ask the coach to send a new Bullpen Planner invite.';
+      return 'This invite has expired. Ask the coach to send a new PitchReady invite.';
     case 'revoked':
       return 'This invite is no longer active. Ask the coach to send a new invite if you still need access.';
     case 'already_accepted':
@@ -102,7 +102,7 @@ export function InviteAcceptScreen() {
     return (
       <FullScreenLoader
         title="Checking invite"
-        subtitle="Validating your Bullpen Planner invite."
+        subtitle="Validating your PitchReady invite."
       />
     );
   }
@@ -140,7 +140,7 @@ export function InviteAcceptScreen() {
   return (
     <Screen
       title={getInviteTitle(currentResult.status)}
-      subtitle="Bullpen Planner player access invite"
+      subtitle="PitchReady player access invite"
     >
       <SectionCard title="Invite">
         <Text style={styles.copy}>{getInviteMessage(currentResult, signedInEmail)}</Text>

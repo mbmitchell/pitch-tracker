@@ -87,10 +87,10 @@ export function SignUpScreen() {
 
   return (
     <Screen
-      title="Create your Bullpen Planner account"
+      title="Create your PitchReady account"
       subtitle={
         inviteToken
-          ? 'Create an account to continue your Bullpen Planner invite.'
+          ? 'Create an account to continue your PitchReady invite.'
           : 'Choose the account type first, then finish email/password setup.'
       }
     >
@@ -214,7 +214,7 @@ export function SignUpScreen() {
       <SectionCard title={accountType === 'player' ? 'Phase 2 testing' : 'Coach-centered v1'}>
         <Text style={styles.note}>
           {inviteToken
-            ? 'This account creation continues an invite flow. After authentication, Bullpen Planner will return you to the invite screen.'
+            ? 'This account creation continues an invite flow. After authentication, PitchReady will return you to the invite screen.'
             : accountType === 'player'
               ? 'Player accounts go through a short onboarding flow after sign-up so the pitcher profile and self-link can be created for testing.'
               : 'Coach sign-up keeps the existing roster and workload flow unchanged.'}
