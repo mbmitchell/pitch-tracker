@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 
 import { colors, spacing } from '@/utils/theme';
+
+const dashboardHref = '/dashboard' as Href;
 
 export function HomeHeaderButton() {
   const router = useRouter();
@@ -9,7 +11,7 @@ export function HomeHeaderButton() {
   return (
     <Pressable
       onPress={() => {
-        router.replace('/');
+        router.replace(dashboardHref);
       }}
       style={({ pressed }) => [styles.button, pressed && styles.pressed]}
     >

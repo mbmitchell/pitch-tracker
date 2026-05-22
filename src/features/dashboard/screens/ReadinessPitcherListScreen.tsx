@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 
 import { PrimaryButton } from '@/components/PrimaryButton';
@@ -24,6 +24,8 @@ import { colors, spacing } from '@/utils/theme';
 type ReadinessPitcherListScreenProps = {
   filter: ReadinessFilterKey;
 };
+
+const dashboardHref = '/dashboard' as Href;
 
 /** Renders the filtered readiness drill-down list from the dashboard. */
 export function ReadinessPitcherListScreen({
@@ -96,7 +98,7 @@ export function ReadinessPitcherListScreen({
             </Text>
             <PrimaryButton
               label="Back to dashboard"
-              onPress={() => router.replace('/')}
+              onPress={() => router.replace(dashboardHref)}
               tone="secondary"
             />
           </View>

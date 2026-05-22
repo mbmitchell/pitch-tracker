@@ -1,7 +1,7 @@
-import { Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
+import { Href, Stack, useRootNavigationState, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { AppShellSyncStatus } from '@/components/AppShellSyncStatus';
 import { FullScreenLoader } from '@/components/FullScreenLoader';
@@ -12,6 +12,12 @@ import { getLinkedPitcherProfileForUser } from '@/services/pitchers';
 import { OfflineSyncProvider } from '@/services/sync';
 import { colors } from '@/utils/theme';
 
+const publicWebTopLevelSegments = new Set(['', 'privacy', 'terms', 'support']);
+const dashboardHref = '/dashboard' as Href;
+const playerHref = '/player' as Href;
+const playerOnboardingHref = '/player/onboarding' as Href;
+const signInHref = '/sign-in' as Href;
+
 function RootNavigator() {
   const { accountType, isAuthenticated, isBootstrapping, profileAccessRefreshKey, user } =
     useAuth();
@@ -21,6 +27,9 @@ function RootNavigator() {
   const [linkedPitcherProfileId, setLinkedPitcherProfileId] = useState<string | null | undefined>(
     undefined
   );
+  const currentTopLevelSegment = segments[0] ?? '';
+  const inPublicWebRoute =
+    Platform.OS === 'web' && publicWebTopLevelSegments.has(currentTopLevelSegment);
   const isPitcherUser = accountType === 'player' || Boolean(linkedPitcherProfileId);
   const isResolvingPitcherLink = isAuthenticated && linkedPitcherProfileId === undefined;
   const shouldShowPlayerOnboarding = accountType === 'player' && !linkedPitcherProfileId;
@@ -63,22 +72,33 @@ function RootNavigator() {
     const inPlayerOnboardingRoute = segments[0] === 'player' && segments[1] === 'onboarding';
     const inInviteRoute = segments[0] === 'invite';
 
-    if (!isAuthenticated && !inAuthGroup && !inInviteRoute) {
-      router.replace('/sign-in');
+    if (!isAuthenticated && !inAuthGroup && !inInviteRoute && !inPublicWebRoute) {
+      router.replace(signInHref);
     }
 
     if (isAuthenticated && inAuthGroup) {
       router.replace(
-        isPitcherUser ? (shouldShowPlayerOnboarding ? '/player/onboarding' : '/player') : '/'
+        isPitcherUser
+          ? shouldShowPlayerOnboarding
+            ? playerOnboardingHref
+            : playerHref
+          : dashboardHref
       );
     }
 
-    if (isAuthenticated && isPitcherUser && !inPlayerRoute && !inAuthGroup && !inInviteRoute) {
-      router.replace(shouldShowPlayerOnboarding ? '/player/onboarding' : '/player');
+    if (
+      isAuthenticated &&
+      isPitcherUser &&
+      !inPlayerRoute &&
+      !inAuthGroup &&
+      !inInviteRoute &&
+      !inPublicWebRoute
+    ) {
+      router.replace(shouldShowPlayerOnboarding ? playerOnboardingHref : playerHref);
     }
 
     if (isAuthenticated && isPitcherUser && inPlayerRoute && shouldShowPlayerOnboarding && !inPlayerOnboardingRoute) {
-      router.replace('/player/onboarding');
+      router.replace(playerOnboardingHref);
     }
 
     if (
@@ -87,11 +107,11 @@ function RootNavigator() {
       inPlayerOnboardingRoute &&
       !shouldShowPlayerOnboarding
     ) {
-      router.replace('/player');
+      router.replace(playerHref);
     }
 
     if (isAuthenticated && !isPitcherUser && inPlayerRoute) {
-      router.replace('/');
+      router.replace(dashboardHref);
     }
   }, [
     isAuthenticated,
@@ -100,6 +120,7 @@ function RootNavigator() {
     isPitcherUser,
     isResolvingPitcherLink,
     shouldShowPlayerOnboarding,
+    inPublicWebRoute,
     navigationState?.key,
     router,
     segments,

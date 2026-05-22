@@ -6,6 +6,7 @@ import { colors } from '@/utils/theme';
 export default function TabsLayout() {
   return (
     <Tabs
+      initialRouteName="dashboard"
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface },
         headerTintColor: colors.text,
@@ -25,7 +26,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen
-        name="index"
+        name="dashboard"
         options={{
           title: 'Dashboard',
           tabBarLabel: 'Home',
