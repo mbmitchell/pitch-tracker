@@ -38,6 +38,7 @@ const homeHref = '/' as Href;
 const privacyHref = '/privacy' as Href;
 const termsHref = '/terms' as Href;
 const supportHref = '/support' as Href;
+const supportEmailHref = 'mailto:support@getpitchready.app' as Href;
 
 function NavLink({ href, isActive, label }: NavLinkProps) {
   return (
@@ -164,6 +165,12 @@ export function PublicSiteLayout({
               Support
             </Link>
           </View>
+          <Text style={styles.footerCopy}>
+            Support:{' '}
+            <Link href={supportEmailHref} style={styles.footerEmailLink}>
+              support@getpitchready.app
+            </Link>
+          </Text>
         </View>
       </View>
     </ScrollView>
@@ -335,6 +342,12 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   footerLink: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+    textDecorationLine: 'none',
+  },
+  footerEmailLink: {
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',

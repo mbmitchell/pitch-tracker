@@ -39,7 +39,7 @@ export function PrivacyPolicyScreen() {
         activeNav="privacy"
         introEyebrow="Privacy Policy"
         introTitle="How PitchReady handles information"
-        introSubtitle="Effective date: [Effective Date]"
+        introSubtitle="Effective Date: May 2026"
       >
         <SurfaceCard subtle>
           <Text style={styles.paragraph}>

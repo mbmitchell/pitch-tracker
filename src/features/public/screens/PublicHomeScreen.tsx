@@ -58,17 +58,13 @@ export function PublicHomeScreen() {
             <View style={styles.heroCopy}>
               <Text style={styles.eyebrow}>Pitcher workload and readiness tracking</Text>
               <Text style={styles.headline}>
-                PitchReady helps pitchers, coaches, and players track throwing workload,
-                bullpen activity, recovery, and readiness.
+                PitchReady helps pitchers, coaches, and players manage throwing workload,
+                bullpen activity, recovery, and readiness in one mobile-first workflow.
               </Text>
               <Text style={styles.heroText}>
                 Built for real coach and player workflows, PitchReady keeps training context in
-                one place so teams can log work, review status, and stay aligned from session to
-                session.
-              </Text>
-              <Text style={styles.heroText}>
-                The app is designed mobile-first with offline-friendly support, making it easier
-                to capture throwing events and recovery notes wherever work happens.
+                one place so teams can log work, review status, and stay aligned session to
+                session, including in offline-friendly environments.
               </Text>
 
               <View style={[styles.ctaRow, !isWide && styles.ctaColumn]}>

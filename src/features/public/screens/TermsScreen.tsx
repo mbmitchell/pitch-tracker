@@ -49,13 +49,22 @@ export function TermsScreen() {
         activeNav="terms"
         introEyebrow="Terms of Service"
         introTitle="Terms for using PitchReady"
-        introSubtitle="Contact: support@getpitchready.app"
+        introSubtitle="Effective Date: May 2026"
       >
         <SurfaceCard subtle>
           <Text style={styles.paragraph}>
             These Terms of Service govern the use of PitchReady. By accessing or using the app,
             you agree to these terms on behalf of yourself and, if applicable, the organization
             you represent.
+          </Text>
+        </SurfaceCard>
+
+        <SurfaceCard subtle>
+          <Text style={styles.noticeTitle}>Important note</Text>
+          <Text style={styles.noticeText}>
+            PitchReady is a training and workload tracking tool. It supports throwing management
+            workflows, but it does not provide medical advice or replace qualified medical
+            judgment.
           </Text>
         </SurfaceCard>
 
@@ -85,6 +94,18 @@ export function TermsScreen() {
 const styles = StyleSheet.create({
   group: {
     gap: spacing.md,
+  },
+  noticeTitle: {
+    color: colors.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
+  },
+  noticeText: {
+    color: colors.text,
+    fontSize: 15,
+    lineHeight: 24,
+    fontWeight: '600',
   },
   paragraph: {
     color: colors.muted,
