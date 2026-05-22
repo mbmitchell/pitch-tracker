@@ -43,8 +43,12 @@ app-example
 /android
 .env
 
+supabase/.temp/
+
 .env
 .env.production
 .env.dev.backup
 .env.*
 !.env.example
+
+supabase/.temp/
