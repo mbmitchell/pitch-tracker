@@ -1,6 +1,7 @@
 import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   countUnsyncedQueueEntries,
@@ -263,7 +264,7 @@ async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
  * @param coachId - authenticated coach id
  */
 export async function processPendingSyncQueueForCoach(coachId: string) {
-  if (!coachId || !getIsOnline() || !isSupabaseConfigured) {
+  if (!coachId || !getIsOnline() || !isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return;
   }
 
@@ -492,7 +493,7 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
     let isActive = true;
 
     async function syncIfNeeded() {
-      if (!user?.id || !isOnline || !isSupabaseConfigured) {
+      if (!user?.id || !isOnline || !isRemoteAppDataEnabled(isSupabaseConfigured)) {
         return;
       }
 

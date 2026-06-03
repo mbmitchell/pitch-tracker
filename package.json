@@ -6,6 +6,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "ios:screenshots:coach": "sh scripts/start-ios-screenshot-mode.sh coach",
+    "ios:screenshots:player": "sh scripts/start-ios-screenshot-mode.sh player",
+    "ios:screenshots:player-setup": "sh scripts/start-ios-screenshot-mode.sh player_setup",
     "web": "expo start --web",
     "export:web": "expo export --platform web",
     "lint": "expo lint"

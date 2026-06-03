@@ -2,6 +2,13 @@ import { Session, User } from '@supabase/supabase-js';
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 
+import {
+  buildScreenshotModeSession,
+  buildScreenshotModeUser,
+  isScreenshotModeEnabled,
+  screenshotProfile,
+} from '@/features/screenshot/screenshotMode';
+import { seedScreenshotDataForProfile } from '@/features/screenshot/screenshotSeed';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { clearLocalOfflineData } from '@/services/localData';
 
@@ -63,6 +70,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 const missingConfigMessage =
   'Supabase Auth is not configured yet. Add EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY to continue.';
+const screenshotModeMessage =
+  'Screenshot mode is controlled by EXPO_PUBLIC_SCREENSHOT_MODE and is disabled for live auth actions.';
 
 function getAccountTypeFromUser(user: User | null): AccountType {
   return user?.user_metadata?.account_type === 'player' ? 'player' : 'coach';
@@ -83,6 +92,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileAccessRefreshKey, setProfileAccessRefreshKey] = useState(0);
 
   useEffect(() => {
+    if (isScreenshotModeEnabled) {
+      let isActive = true;
+
+      async function bootstrapScreenshotMode() {
+        try {
+          await seedScreenshotDataForProfile(screenshotProfile);
+          if (!isActive) {
+            return;
+          }
+
+          setSession(buildScreenshotModeSession(screenshotProfile));
+          setUser(buildScreenshotModeUser(screenshotProfile));
+          setAuthError(null);
+        } catch (error) {
+          if (!isActive) {
+            return;
+          }
+
+          setSession(null);
+          setUser(null);
+          setAuthError(
+            error instanceof Error
+              ? `Screenshot mode failed to seed local demo data: ${error.message}`
+              : 'Screenshot mode failed to seed local demo data.'
+          );
+        } finally {
+          if (isActive) {
+            setIsBootstrapping(false);
+          }
+        }
+      }
+
+      void bootstrapScreenshotMode();
+
+      return () => {
+        isActive = false;
+      };
+    }
+
     function handleAppStateChange(state: AppStateStatus) {
       if (Platform.OS === 'web') {
         return;
@@ -141,6 +189,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signIn({ email, password }: Credentials): Promise<SignInResult> {
     setAuthError(null);
 
+    if (isScreenshotModeEnabled) {
+      setAuthError(screenshotModeMessage);
+      return { success: false, error: screenshotModeMessage };
+    }
+
     if (!isSupabaseConfigured) {
       setAuthError(missingConfigMessage);
       return { success: false, error: missingConfigMessage };
@@ -169,6 +222,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password,
   }: SignUpCredentials): Promise<SignUpResult> {
     setAuthError(null);
+
+    if (isScreenshotModeEnabled) {
+      setAuthError(screenshotModeMessage);
+      return {
+        success: false,
+        error: screenshotModeMessage,
+        requiresEmailConfirmation: false,
+      };
+    }
 
     if (!isSupabaseConfigured) {
       setAuthError(missingConfigMessage);
@@ -209,6 +271,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut(): Promise<SignOutResult> {
     setAuthError(null);
+
+    if (isScreenshotModeEnabled) {
+      return { success: true };
+    }
+
     setAuthAction('signOut');
 
     const { error } = await supabase.auth.signOut();
@@ -238,6 +305,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function requestPasswordReset(email: string): Promise<PasswordResetResult> {
     setAuthError(null);
+
+    if (isScreenshotModeEnabled) {
+      setAuthError(screenshotModeMessage);
+      return { success: false, error: screenshotModeMessage };
+    }
 
     if (!isSupabaseConfigured) {
       setAuthError(missingConfigMessage);

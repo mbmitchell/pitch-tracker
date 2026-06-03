@@ -1,3 +1,4 @@
+import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   EventPitchBreakdown,
@@ -69,7 +70,7 @@ function reportLocalCacheWriteError(context: string, error: unknown) {
 }
 
 function canUseRemote() {
-  return isSupabaseConfigured && getIsOnline();
+  return isRemoteAppDataEnabled(isSupabaseConfigured) && getIsOnline();
 }
 
 function normalizePitchBreakdown(
@@ -321,7 +322,7 @@ async function resolveAccessiblePitcherForUser(userId: string, pitcherId: string
     return coachOwnedPitcher;
   }
 
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return null;
   }
 

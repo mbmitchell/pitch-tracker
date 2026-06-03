@@ -1,3 +1,4 @@
+import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { createThrowingEventForPlayer, PitchBreakdownInput, ThrowingEventInput } from '@/services/events';
 import {
@@ -83,7 +84,7 @@ async function triggerSyncIfOnline(ownerId: string) {
 }
 
 function canUseRemote() {
-  return isSupabaseConfigured && getIsOnline();
+  return isRemoteAppDataEnabled(isSupabaseConfigured) && getIsOnline();
 }
 
 function normalizeAssignedWorkoutNotes(value: string | null | undefined) {

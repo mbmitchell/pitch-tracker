@@ -1,3 +1,4 @@
+import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   generateClientId,
@@ -143,7 +144,7 @@ function reportLocalCacheWriteError(context: string, error: unknown) {
 }
 
 function canUseRemote() {
-  return isSupabaseConfigured && getIsOnline();
+  return isRemoteAppDataEnabled(isSupabaseConfigured) && getIsOnline();
 }
 
 function isActiveInviteStatus(status: PitcherProfileInvite['status']) {
@@ -665,7 +666,7 @@ export async function linkPitcherProfileToUser(
 export async function getLinkedPitcherProfileForUser(userId: string) {
   const localPitchers = await listLocalPitchersForCoach(userId);
 
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return localPitchers[0] ?? null;
   }
 
@@ -704,7 +705,7 @@ export async function getPitcherProfileLinkStatusForCoach(
   coachId: string,
   pitcherProfileId: string
 ) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return null;
   }
 
@@ -736,7 +737,7 @@ export async function getPitcherProfileInviteStatusForCoach(
   coachId: string,
   pitcherProfileId: string
 ) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return null;
   }
 
@@ -921,7 +922,7 @@ export async function revokePitcherProfileInviteForCoach(coachId: string, invite
  * @returns safe invite validation state for UI routing
  */
 export async function validatePitcherProfileInviteToken(token: string) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     throw new Error('Supabase must be configured before invites can be validated.');
   }
 
@@ -944,7 +945,7 @@ export async function validatePitcherProfileInviteToken(token: string) {
  * @returns accept result for the invite flow UI
  */
 export async function acceptPitcherProfileInviteForUser(token: string) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     throw new Error('Supabase must be configured before invites can be accepted.');
   }
 
@@ -966,7 +967,7 @@ export async function acceptPitcherProfileInviteForUser(token: string) {
  * @returns invite matches for the authenticated player email
  */
 export async function listPendingPitcherProfileInvitesForUser() {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return [] as PlayerPendingPitcherInvite[];
   }
 
@@ -983,7 +984,7 @@ export async function listPendingPitcherProfileInvitesForUser() {
  * @returns accept result for the onboarding prompt
  */
 export async function acceptPendingPitcherProfileInviteForUser(inviteId: string) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     throw new Error('Supabase must be configured before invites can be accepted.');
   }
 
@@ -1009,7 +1010,7 @@ export async function findPitcherUserByEmailForCoach(
   pitcherProfileId: string,
   email: string
 ) {
-  if (!isSupabaseConfigured) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
     return null;
   }
 
