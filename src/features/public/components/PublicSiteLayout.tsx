@@ -1,4 +1,5 @@
 import { Href, Link } from 'expo-router';
+import { Image } from 'expo-image';
 import { ReactNode } from 'react';
 import {
   Pressable,
@@ -34,11 +35,16 @@ type LinkButtonProps = {
   tone?: 'primary' | 'secondary';
 };
 
+type BrandIconProps = {
+  size?: number;
+};
+
 const homeHref = '/' as Href;
 const privacyHref = '/privacy' as Href;
 const termsHref = '/terms' as Href;
 const supportHref = '/support' as Href;
 const supportEmailHref = 'mailto:support@getpitchready.app' as Href;
+const brandIcon = require('../../../../assets/images/icon.png');
 
 function NavLink({ href, isActive, label }: NavLinkProps) {
   return (
@@ -47,6 +53,32 @@ function NavLink({ href, isActive, label }: NavLinkProps) {
         <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{label}</Text>
       </Pressable>
     </Link>
+  );
+}
+
+export function BrandIcon({ size = 44 }: BrandIconProps) {
+  return (
+    <View
+      style={[
+        styles.brandIconFrame,
+        {
+          borderRadius: Math.round(size * 0.28),
+          height: size,
+          width: size,
+        },
+      ]}
+    >
+      <Image
+        contentFit="cover"
+        source={brandIcon}
+        style={[
+          styles.brandIconImage,
+          {
+            borderRadius: Math.round(size * 0.22),
+          },
+        ]}
+      />
+    </View>
   );
 }
 
@@ -126,7 +158,11 @@ export function PublicSiteLayout({
         <View style={[styles.topBar, !isWide && styles.topBarStacked]}>
           <Link asChild href={homeHref}>
             <Pressable style={({ pressed }) => [styles.brandLink, pressed && styles.pressed]}>
-              <Text style={styles.brandName}>PitchReady</Text>
+              <BrandIcon />
+              <View style={styles.brandCopy}>
+                <Text style={styles.brandName}>PitchReady</Text>
+                <Text style={styles.brandTagline}>Workload and readiness tracking</Text>
+              </View>
             </Pressable>
           </Link>
 
@@ -208,12 +244,37 @@ const styles = StyleSheet.create({
   },
   brandLink: {
     paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  brandCopy: {
+    gap: 2,
+  },
+  brandIconFrame: {
+    padding: 3,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D5E4F2',
+    shadowColor: '#0D2740',
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
+  },
+  brandIconImage: {
+    flex: 1,
   },
   brandName: {
     fontSize: 24,
     fontWeight: '800',
     color: colors.text,
     letterSpacing: -0.4,
+  },
+  brandTagline: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '600',
   },
   navRow: {
     flexDirection: 'row',

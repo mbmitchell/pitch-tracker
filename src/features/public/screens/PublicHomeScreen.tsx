@@ -1,7 +1,9 @@
 import { Href, Link, Stack } from 'expo-router';
+import { Image } from 'expo-image';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import {
+  BrandIcon,
   LinkButton,
   PublicSection,
   PublicSiteLayout,
@@ -12,6 +14,7 @@ import { colors, radius, spacing } from '@/utils/theme';
 const privacyHref = '/privacy' as Href;
 const termsHref = '/terms' as Href;
 const supportHref = '/support' as Href;
+const approvedIcon = require('../../../../assets/images/icon.png');
 
 const featureCards = [
   {
@@ -76,6 +79,23 @@ export function PublicHomeScreen() {
             </View>
 
             <View style={styles.heroPanel}>
+              <View style={styles.heroBrandCard}>
+                <View style={styles.heroBrandHeader}>
+                  <BrandIcon size={52} />
+                  <View style={styles.heroBrandCopy}>
+                    <Text style={styles.heroBrandTitle}>PitchReady</Text>
+                    <Text style={styles.heroBrandText}>
+                      Baseball-first workload and readiness tracking for modern staff and
+                      athlete workflows.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.heroIconStage}>
+                  <Image contentFit="contain" source={approvedIcon} style={styles.heroIcon} />
+                </View>
+              </View>
+
               <SurfaceCard subtle>
                 <Text style={styles.panelEyebrow}>What PitchReady focuses on</Text>
                 <View style={styles.panelList}>
@@ -151,6 +171,7 @@ const styles = StyleSheet.create({
   heroPanel: {
     flex: 1,
     justifyContent: 'center',
+    gap: spacing.md,
   },
   eyebrow: {
     color: colors.primary,
@@ -194,6 +215,49 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 15,
     fontWeight: '800',
+  },
+  heroBrandCard: {
+    borderRadius: 24,
+    padding: spacing.md,
+    gap: spacing.md,
+    backgroundColor: '#EEF5FC',
+    borderWidth: 1,
+    borderColor: '#D7E5F2',
+  },
+  heroBrandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  heroBrandCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  heroBrandTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  heroBrandText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  heroIconStage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D9E6F2',
+  },
+  heroIcon: {
+    width: '100%',
+    maxWidth: 210,
+    aspectRatio: 1,
   },
   panelEyebrow: {
     color: colors.text,
