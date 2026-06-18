@@ -4,6 +4,10 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { createClient, processLock } from '@supabase/supabase-js';
 
+import {
+  isScreenshotModeEnabled,
+  screenshotModeLog,
+} from '@/features/screenshot/screenshotMode';
 import { Database } from '@/types/database';
 
 const supabaseUrl =
@@ -59,6 +63,27 @@ const webStorage =
 
 const authStorage = Platform.OS === 'web' ? webStorage : secureStoreAuthStorage;
 
+const screenshotModeBlockedFetch: typeof fetch = async (input, init) => {
+  const requestUrl =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : 'url' in input && typeof input.url === 'string'
+          ? input.url
+          : String(input);
+
+  if (__DEV__) {
+    console.log('[network-trace] blocked supabase fetch in screenshot mode', {
+      init,
+      stack: new Error().stack,
+      url: requestUrl,
+    });
+  }
+
+  throw new Error(`Blocked Supabase fetch in screenshot mode: ${requestUrl}`);
+};
+
 if (
   !process.env.EXPO_PUBLIC_SUPABASE_URL ||
   !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
@@ -70,10 +95,19 @@ if (
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: authStorage,
-    autoRefreshToken: true,
-    persistSession: true,
+    storage: isScreenshotModeEnabled ? fallbackStorage : authStorage,
+    autoRefreshToken: !isScreenshotModeEnabled,
+    persistSession: !isScreenshotModeEnabled,
     detectSessionInUrl: false,
     lock: processLock,
   },
+  global: isScreenshotModeEnabled
+    ? {
+        fetch: screenshotModeBlockedFetch,
+      }
+    : undefined,
 });
+
+if (isScreenshotModeEnabled) {
+  screenshotModeLog('Created local-only Supabase client with blocked fetch transport.');
+}

@@ -1,4 +1,8 @@
-import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
+import {
+  isRemoteAppDataEnabled,
+  screenshotModeLog,
+  shouldUseSeededLinkedPitcherProfile,
+} from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   generateClientId,
@@ -203,6 +207,10 @@ function normalizePitcherInput(input: PitcherProfileInput): PitcherProfileInput 
 }
 
 async function fetchPitchersFromRemote(coachId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchPitchersFromRemote', { coachId });
+  }
+
   const { data, error } = await supabaseClient
     .from('pitcher_profiles')
     .select('*')
@@ -218,6 +226,10 @@ async function fetchPitchersFromRemote(coachId: string) {
 }
 
 async function fetchPitcherFromRemote(coachId: string, pitcherId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchPitcherFromRemote', { coachId, pitcherId });
+  }
+
   const { data, error } = await supabaseClient
     .from('pitcher_profiles')
     .select('*')
@@ -247,6 +259,10 @@ async function createPitcherInRemote(payload: PitcherProfileInsert) {
 }
 
 async function fetchLinkedPitcherProfileFromRemote(userId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchLinkedPitcherProfileFromRemote', { userId });
+  }
+
   const { data, error } = await supabaseClient
     .from('pitcher_profile_links')
     .select('pitcher_profiles(*)')
@@ -609,6 +625,11 @@ export async function linkPitcherProfileToUser(
   pitcherProfileId: string,
   userId: string
 ) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Blocked remote player-link action in local-only screenshot mode.');
+    throw new Error('Player account linking is unavailable in screenshot mode.');
+  }
+
   const pitcher = await fetchPitcherFromRemote(coachId, pitcherProfileId);
 
   if (!pitcher) {
@@ -667,7 +688,8 @@ export async function getLinkedPitcherProfileForUser(userId: string) {
   const localPitchers = await listLocalPitchersForCoach(userId);
 
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
-    return localPitchers[0] ?? null;
+    screenshotModeLog('Using local-only linked pitcher profile lookup.');
+    return shouldUseSeededLinkedPitcherProfile() ? (localPitchers[0] ?? null) : null;
   }
 
   try {
@@ -772,6 +794,11 @@ export async function createPitcherProfileInviteForCoach(
   pitcherProfileId: string,
   email: string
 ): Promise<PitcherProfileInviteMutationResult> {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Blocked invite creation in local-only screenshot mode.');
+    throw new Error('Invite creation is unavailable in screenshot mode.');
+  }
+
   const pitcher = await fetchPitcherFromRemote(coachId, pitcherProfileId);
 
   if (!pitcher) {
@@ -794,10 +821,6 @@ export async function createPitcherProfileInviteForCoach(
 
   if (!email.trim()) {
     throw new Error('Enter the player email to create an invite.');
-  }
-
-  if (!isSupabaseConfigured) {
-    throw new Error('Supabase must be configured before invites can be created.');
   }
 
   if (!getIsOnline()) {
@@ -828,6 +851,11 @@ export async function resendPitcherProfileInviteForCoach(
   coachId: string,
   pitcherProfileId: string
 ): Promise<PitcherProfileInviteMutationResult> {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Blocked invite resend in local-only screenshot mode.');
+    throw new Error('Invite resend is unavailable in screenshot mode.');
+  }
+
   const pitcher = await fetchPitcherFromRemote(coachId, pitcherProfileId);
 
   if (!pitcher) {
@@ -844,10 +872,6 @@ export async function resendPitcherProfileInviteForCoach(
 
   if (!existingInvite || !isActiveInviteStatus(existingInvite.status)) {
     throw new Error('There is no active invite to resend.');
-  }
-
-  if (!isSupabaseConfigured) {
-    throw new Error('Supabase must be configured before invites can be resent.');
   }
 
   if (!getIsOnline()) {
@@ -872,6 +896,11 @@ export async function resendPitcherProfileInviteForCoach(
  * @returns updated invite row
  */
 export async function revokePitcherProfileInviteForCoach(coachId: string, inviteId: string) {
+  if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Blocked invite revoke in local-only screenshot mode.');
+    throw new Error('Invite revoke is unavailable in screenshot mode.');
+  }
+
   const { data: existingInvite, error: existingError } = await supabaseClient
     .from('pitcher_profile_invites')
     .select('*')
@@ -923,7 +952,8 @@ export async function revokePitcherProfileInviteForCoach(coachId: string, invite
  */
 export async function validatePitcherProfileInviteToken(token: string) {
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
-    throw new Error('Supabase must be configured before invites can be validated.');
+    screenshotModeLog('Blocked invite token validation in local-only screenshot mode.');
+    throw new Error('Invite validation is unavailable in screenshot mode.');
   }
 
   if (!token.trim()) {
@@ -946,7 +976,8 @@ export async function validatePitcherProfileInviteToken(token: string) {
  */
 export async function acceptPitcherProfileInviteForUser(token: string) {
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
-    throw new Error('Supabase must be configured before invites can be accepted.');
+    screenshotModeLog('Blocked invite acceptance in local-only screenshot mode.');
+    throw new Error('Invite acceptance is unavailable in screenshot mode.');
   }
 
   if (!token.trim()) {
@@ -968,6 +999,7 @@ export async function acceptPitcherProfileInviteForUser(token: string) {
  */
 export async function listPendingPitcherProfileInvitesForUser() {
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Skipping pending invite lookup in local-only screenshot mode.');
     return [] as PlayerPendingPitcherInvite[];
   }
 
@@ -985,7 +1017,8 @@ export async function listPendingPitcherProfileInvitesForUser() {
  */
 export async function acceptPendingPitcherProfileInviteForUser(inviteId: string) {
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
-    throw new Error('Supabase must be configured before invites can be accepted.');
+    screenshotModeLog('Blocked pending invite acceptance in local-only screenshot mode.');
+    throw new Error('Invite acceptance is unavailable in screenshot mode.');
   }
 
   if (!inviteId.trim()) {
@@ -1011,6 +1044,7 @@ export async function findPitcherUserByEmailForCoach(
   email: string
 ) {
   if (!isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    screenshotModeLog('Blocked remote player lookup in local-only screenshot mode.');
     return null;
   }
 

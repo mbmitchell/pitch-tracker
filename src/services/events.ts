@@ -103,6 +103,13 @@ async function fetchThrowingEventsForPitcherFromRemote(
   pitcherId: string,
   limit: number
 ) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchThrowingEventsForPitcherFromRemote', {
+      limit,
+      pitcherId,
+    });
+  }
+
   const { data, error } = await supabaseClient
     .from('throwing_events')
     .select('*, event_pitch_breakdown(*)')
@@ -122,6 +129,10 @@ async function fetchThrowingEventsForPitcherFromRemote(
 }
 
 async function fetchAccessiblePitcherFromRemote(pitcherId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchAccessiblePitcherFromRemote', { pitcherId });
+  }
+
   const { data, error } = await supabaseClient
     .from('pitcher_profiles')
     .select('*')
@@ -136,6 +147,10 @@ async function fetchAccessiblePitcherFromRemote(pitcherId: string) {
 }
 
 async function fetchThrowingEventsForCoachFromRemote(coachId: string, limit: number) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchThrowingEventsForCoachFromRemote', { coachId, limit });
+  }
+
   const { data: pitchers, error: pitcherError } = await supabaseClient
     .from('pitcher_profiles')
     .select('id')

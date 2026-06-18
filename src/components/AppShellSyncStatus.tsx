@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { SyncStatusBanner } from '@/components/SyncStatusBanner';
+import { isScreenshotModeEnabled } from '@/features/screenshot/screenshotMode';
 import { useAuth } from '@/services/auth';
 import { spacing } from '@/utils/theme';
 
@@ -17,7 +18,7 @@ export function AppShellSyncStatus() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || isScreenshotModeEnabled) {
     return null;
   }
 

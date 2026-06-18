@@ -14,6 +14,7 @@ import type {
 
 import {
   ScreenshotProfile,
+  screenshotModeLog,
   screenshotProfileUserIds,
 } from '@/features/screenshot/screenshotMode';
 
@@ -401,16 +402,20 @@ async function seedPlayerMode(profile: ScreenshotProfile) {
  * without touching real users or depending on live backend records.
  */
 export async function seedScreenshotDataForProfile(profile: ScreenshotProfile) {
+  screenshotModeLog(`Resetting local data and seeding profile "${profile}".`);
   await clearLocalOfflineData();
 
   switch (profile) {
     case 'coach':
       await seedCoachMode(profile);
+      screenshotModeLog('Coach demo data ready.');
       return;
     case 'player':
       await seedPlayerMode(profile);
+      screenshotModeLog('Player demo data ready.');
       return;
     case 'player_setup':
+      screenshotModeLog('Player setup demo mode ready with no linked profile.');
       return;
     default:
       return;

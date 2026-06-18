@@ -6,6 +6,7 @@ import {
   buildScreenshotModeSession,
   buildScreenshotModeUser,
   isScreenshotModeEnabled,
+  screenshotModeLog,
   screenshotProfile,
 } from '@/features/screenshot/screenshotMode';
 import { seedScreenshotDataForProfile } from '@/features/screenshot/screenshotSeed';
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
 
+          screenshotModeLog(`Bootstrapping local-only auth for "${screenshotProfile}".`);
           setSession(buildScreenshotModeSession(screenshotProfile));
           setUser(buildScreenshotModeUser(screenshotProfile));
           setAuthError(null);
@@ -145,6 +147,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     async function bootstrapSession() {
+      if (__DEV__) {
+        console.log('[network-trace] auth bootstrap getSession');
+      }
+
       const { data, error } = await supabase.auth.getSession();
 
       if (error) {
@@ -173,6 +179,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : AppState.addEventListener('change', handleAppStateChange);
 
     if (Platform.OS !== 'web') {
+      if (__DEV__) {
+        console.log('[network-trace] auth startAutoRefresh');
+      }
+
       supabase.auth.startAutoRefresh();
     }
 
@@ -190,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     if (isScreenshotModeEnabled) {
+      screenshotModeLog('Blocked live sign-in while screenshot mode is enabled.');
       setAuthError(screenshotModeMessage);
       return { success: false, error: screenshotModeMessage };
     }
@@ -224,6 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     if (isScreenshotModeEnabled) {
+      screenshotModeLog('Blocked live sign-up while screenshot mode is enabled.');
       setAuthError(screenshotModeMessage);
       return {
         success: false,
@@ -273,6 +285,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     if (isScreenshotModeEnabled) {
+      screenshotModeLog('Ignoring sign-out request in screenshot mode.');
       return { success: true };
     }
 
@@ -307,6 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthError(null);
 
     if (isScreenshotModeEnabled) {
+      screenshotModeLog('Blocked password reset while screenshot mode is enabled.');
       setAuthError(screenshotModeMessage);
       return { success: false, error: screenshotModeMessage };
     }

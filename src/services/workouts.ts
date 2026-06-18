@@ -156,6 +156,10 @@ function mergeAssignedWorkoutsWithLocalUnsynced(
 }
 
 async function fetchAssignedWorkoutById(workoutId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchAssignedWorkoutById', { workoutId });
+  }
+
   const { data, error } = await supabaseClient
     .from('assigned_workouts')
     .select('*')
@@ -170,6 +174,10 @@ async function fetchAssignedWorkoutById(workoutId: string) {
 }
 
 async function fetchAssignedWorkoutsForPitcherFromRemote(pitcherId: string) {
+  if (__DEV__) {
+    console.log('[network-trace] fetchAssignedWorkoutsForPitcherFromRemote', { pitcherId });
+  }
+
   const { data, error } = await supabaseClient
     .from('assigned_workouts')
     .select('*')

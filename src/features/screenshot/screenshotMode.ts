@@ -73,3 +73,13 @@ export function buildScreenshotModeSession(profile: ScreenshotProfile): Session 
 export function isRemoteAppDataEnabled(isSupabaseConfigured: boolean) {
   return isSupabaseConfigured && !isScreenshotModeEnabled;
 }
+
+export function screenshotModeLog(message: string) {
+  if (isScreenshotModeEnabled && __DEV__) {
+    console.info(`[screenshot-mode] ${message}`);
+  }
+}
+
+export function shouldUseSeededLinkedPitcherProfile() {
+  return isScreenshotModeEnabled && screenshotProfile === 'player';
+}

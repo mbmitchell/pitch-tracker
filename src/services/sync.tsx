@@ -1,7 +1,11 @@
-import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
+import NetInfo from '@react-native-community/netinfo';
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-import { isRemoteAppDataEnabled } from '@/features/screenshot/screenshotMode';
+import {
+  isRemoteAppDataEnabled,
+  isScreenshotModeEnabled,
+  screenshotModeLog,
+} from '@/features/screenshot/screenshotMode';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import {
   countUnsyncedQueueEntries,
@@ -265,6 +269,9 @@ async function processQueueEntry(coachId: string, queueEntry: LocalQueueEntry) {
  */
 export async function processPendingSyncQueueForCoach(coachId: string) {
   if (!coachId || !getIsOnline() || !isRemoteAppDataEnabled(isSupabaseConfigured)) {
+    if (isScreenshotModeEnabled) {
+      screenshotModeLog('Skipping sync queue processing in local-only screenshot mode.');
+    }
     return;
   }
 
@@ -440,19 +447,42 @@ export function useSyncStatus() {
  */
 export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const netInfo = useNetInfo();
   const [isSyncing, setIsSyncing] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
-
-  const isOnline = Boolean(
-    netInfo.isConnected && (netInfo.isInternetReachable ?? true)
-  );
+  const [isOnline, setIsOnline] = useState(() => (isScreenshotModeEnabled ? false : true));
 
   useEffect(() => {
     onlineState = isOnline;
     notifySyncListeners();
   }, [isOnline]);
+
+  useEffect(() => {
+    if (isScreenshotModeEnabled) {
+      onlineState = false;
+      setIsOnline(false);
+      screenshotModeLog('Forcing sync provider offline to avoid any network activity.');
+      return;
+    }
+
+    let isActive = true;
+
+    async function loadInitialConnectivity() {
+      const state = await NetInfo.fetch();
+
+      if (!isActive) {
+        return;
+      }
+
+      setIsOnline(Boolean(state.isConnected && (state.isInternetReachable ?? true)));
+    }
+
+    void loadInitialConnectivity();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -514,8 +544,14 @@ export function OfflineSyncProvider({ children }: { children: ReactNode }) {
   }, [isOnline, user?.id]);
 
   useEffect(() => {
+    if (isScreenshotModeEnabled) {
+      return;
+    }
+
     const unsubscribe = NetInfo.addEventListener((state) => {
-      onlineState = Boolean(state.isConnected && (state.isInternetReachable ?? true));
+      const nextIsOnline = Boolean(state.isConnected && (state.isInternetReachable ?? true));
+      onlineState = nextIsOnline;
+      setIsOnline(nextIsOnline);
     });
 
     return unsubscribe;

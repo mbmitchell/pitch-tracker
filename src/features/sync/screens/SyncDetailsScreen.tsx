@@ -5,6 +5,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Screen } from '@/components/Screen';
 import { SectionCard } from '@/components/SectionCard';
+import { isScreenshotModeEnabled } from '@/features/screenshot/screenshotMode';
 import { useAuth } from '@/services/auth';
 import {
   listSyncQueueItemsForCoach,
@@ -251,7 +252,7 @@ export function SyncDetailsScreen() {
           }}
           tone="secondary"
         />
-        {__DEV__ ? (
+        {__DEV__ && !isScreenshotModeEnabled ? (
           <PrimaryButton
             disabled={isResettingLocalData}
             label="Reset local offline data"
